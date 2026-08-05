@@ -1,0 +1,28 @@
+<Window
+    x:Class="HeadPointerMvp.SettingsWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:HeadPointerMvp"
+    Title="HeadPointer settings">
+  <ScrollViewer>
+    <StackPanel Spacing="12" Padding="24" Width="420">
+      <TextBlock Text="HeadPointer MVP" Style="{StaticResource TitleTextBlockStyle}" />
+      <TextBlock Text="Move the pointer to a monitor after a deliberate head turn. Changes are saved locally." TextWrapping="Wrap" />
+      <ToggleSwitch x:Name="EnabledSwitch" Header="Enable head tracking" />
+      <NumberBox x:Name="DwellBox" Header="Dwell time (milliseconds)" Minimum="100" Maximum="3000" SpinButtonPlacementMode="Compact" />
+      <NumberBox x:Name="CooldownBox" Header="Cooldown after a move (milliseconds)" Minimum="250" Maximum="5000" SpinButtonPlacementMode="Compact" />
+      <NumberBox x:Name="ThresholdBox" Header="Yaw threshold (degrees)" Minimum="3" Maximum="45" SpinButtonPlacementMode="Compact" />
+      <NumberBox x:Name="SmoothingBox" Header="Smoothing factor (0.05–1.0)" Minimum="0.05" Maximum="1" SmallChange="0.05" SpinButtonPlacementMode="Compact" />
+      <NumberBox x:Name="CenterMonitorBox" Header="Center monitor index (zero based)" Minimum="0" Maximum="10" SpinButtonPlacementMode="Compact" />
+      <ToggleSwitch x:Name="StartupSwitch" Header="Start with Windows" />
+      <TextBox x:Name="HostBox" Header="OpenSeeFace bridge host" />
+      <NumberBox x:Name="PortBox" Header="OpenSeeFace bridge UDP port" Minimum="1024" Maximum="65535" SpinButtonPlacementMode="Compact" />
+      <TextBlock Text="Hotkeys: Ctrl+Alt+H toggles tracking; Ctrl+Alt+P pauses it. Restart the app after changing hotkeys in settings.json." TextWrapping="Wrap" Opacity="0.7" />
+      <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+        <Button Content="Cancel" Click="Cancel_Click" />
+        <Button Content="Save" Click="Save_Click" Style="{StaticResource AccentButtonStyle}" />
+      </StackPanel>
+      <TextBlock x:Name="StatusText" TextWrapping="Wrap" Foreground="DarkRed" />
+    </StackPanel>
+  </ScrollViewer>
+</Window>

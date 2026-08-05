@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <RootNamespace>HeadPointerMvp</RootNamespace>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Build-order dependency only: the bridge is a standalone process, not a linked assembly. -->
+    <ProjectReference Include="..\HeadPointerMvp.CameraBridge\HeadPointerMvp.CameraBridge.csproj" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Offline, built-in Windows speech recognition for the voice-command input method. -->
+    <PackageReference Include="System.Speech" Version="8.0.0" />
+    <!-- WASAPI capture + resampling, so voice commands can listen on a specific chosen microphone
+         instead of always following whatever Windows' system-wide default recording device is. -->
+    <PackageReference Include="NAudio" Version="2.2.1" />
+  </ItemGroup>
+
+  <Target Name="CopyCameraBridgeOutput" AfterTargets="Build">
+    <ItemGroup>
+      <CameraBridgeFiles Include="..\HeadPointerMvp.CameraBridge\bin\$(Configuration)\$(TargetFramework)\**\*.*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(CameraBridgeFiles)" DestinationFolder="$(OutDir)CameraBridge\%(RecursiveDir)" SkipUnchangedFiles="true" />
+  </Target>
+</Project>

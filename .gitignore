@@ -1,0 +1,49 @@
+## .NET / Visual Studio build output
+[Bb]in/
+[Oo]bj/
+[Dd]ebug/
+[Dd]ebug[Pp]ublic/
+[Rr]elease/
+x64/
+x86/
+build-check/
+
+## Visual Studio cache/options
+.vs/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.userprefs
+
+## Rider
+.idea/
+
+## VS Code
+.vscode/
+
+## NuGet
+*.nupkg
+*.snupkg
+**/[Pp]ackages/*
+!**/[Pp]ackages/build/
+*.nuget.props
+*.nuget.targets
+
+## Build results / MSBuild logs
+*.binlog
+*.log
+msbuild.log
+msbuild.err
+msbuild.wrn
+
+## Rider/ReSharper
+_ReSharper*/
+*.[Rr]e[Ss]harper
+*.DotSettings.user
+
+## OS files
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+.DS_Store
