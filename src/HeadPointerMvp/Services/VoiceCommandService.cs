@@ -25,7 +25,12 @@ public sealed class VoiceCommandService : IDisposable
     private static readonly string[] NumberWords =
         ["one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten"];
 
+    private const string GridDigitKey = "gridDigit";
+    private const string GridCommandKey = "gridCommand";
+    private const string OpenGridKey = "openGrid";
+
     private readonly FileLogger _logger;
+    private Grammar? _gridGrammar;
     private SpeechRecognitionEngine? _engine;
     private WasapiCapture? _capture;
     private LiveAudioStream? _liveStream;
@@ -35,6 +40,20 @@ public sealed class VoiceCommandService : IDisposable
     public VoiceCommandService(FileLogger logger) => _logger = logger;
 
     public event Action<int>? MonitorRequested;
+
+    /// <summary>"grid" / "mouse grid" / "show grid".</summary>
+    public event Action? GridRequested;
+
+    /// <summary>A digit 1..9 spoken while the grid is open.</summary>
+    public event Action<int>? GridDigitSpoken;
+
+    public event Action<GridCommand>? GridCommandSpoken;
+
+    /// <summary>The digit/click grammar is only live while the grid is open, so everyday speech can't trip it.</summary>
+    public void SetGridMode(bool active)
+    {
+        if (_gridGrammar is not null) _gridGrammar.Enabled = active;
+    }
 
     /// <summary>Lists active capture (recording) devices for the Settings microphone picker.</summary>
     public static IReadOnlyList<(string Id, string Name)> ListMicrophones()
@@ -95,6 +114,10 @@ public sealed class VoiceCommandService : IDisposable
             _engine.UpdateRecognizerSetting("CFGConfidenceRejectionThreshold", 0);
 
             _engine.LoadGrammar(new Grammar(builder));
+            _engine.LoadGrammar(BuildOpenGridGrammar());
+            _gridGrammar = BuildGridGrammar();
+            _gridGrammar.Enabled = false;
+            _engine.LoadGrammar(_gridGrammar);
             _engine.SpeechRecognized += OnSpeechRecognized;
             _engine.SpeechRecognitionRejected += OnSpeechRejected;
 
@@ -120,6 +143,35 @@ public sealed class VoiceCommandService : IDisposable
             _engine?.Dispose();
             _engine = null;
         }
+    }
+
+    private static Grammar BuildOpenGridGrammar()
+    {
+        var phrases = new Choices("grid", "mouse grid", "show grid", "pointer grid");
+        return new Grammar(new GrammarBuilder(new SemanticResultKey(OpenGridKey, new SemanticResultValue(phrases, "open")))) { Name = "openGrid" };
+    }
+
+    private static Grammar BuildGridGrammar()
+    {
+        var digits = new Choices();
+        for (var i = 0; i < 9; i++) digits.Add(new SemanticResultValue(NumberWords[i], i + 1));
+
+        var commands = new Choices();
+        void Add(string phrase, GridCommand command) => commands.Add(new SemanticResultValue(phrase, (int)command));
+        Add("click", GridCommand.Click);
+        Add("select", GridCommand.Click);
+        Add("right click", GridCommand.RightClick);
+        Add("double click", GridCommand.DoubleClick);
+        Add("back", GridCommand.Back);
+        Add("undo", GridCommand.Back);
+        Add("cancel", GridCommand.Cancel);
+        Add("close grid", GridCommand.Cancel);
+        Add("next monitor", GridCommand.NextMonitor);
+
+        var all = new Choices(
+            new GrammarBuilder(new SemanticResultKey(GridDigitKey, digits)),
+            new GrammarBuilder(new SemanticResultKey(GridCommandKey, commands)));
+        return new Grammar(new GrammarBuilder(all)) { Name = "grid" };
     }
 
     /// <summary>
@@ -254,6 +306,27 @@ public sealed class VoiceCommandService : IDisposable
             if (confidence < MinimumConfidence)
             {
                 _ = _logger.InfoAsync($"[voice] heard \"{text}\" but confidence {confidence:0.00} is below the {MinimumConfidence:0.00} threshold.");
+                return;
+            }
+
+            if (e.Result.Semantics.ContainsKey(OpenGridKey))
+            {
+                _ = _logger.InfoAsync($"[voice] heard \"{text}\" (confidence {confidence:0.00}) -> open grid.");
+                GridRequested?.Invoke();
+                return;
+            }
+
+            if (e.Result.Semantics.ContainsKey(GridDigitKey) && e.Result.Semantics[GridDigitKey].Value is int digit)
+            {
+                _ = _logger.InfoAsync($"[voice] heard \"{text}\" (confidence {confidence:0.00}) -> grid {digit}.");
+                GridDigitSpoken?.Invoke(digit);
+                return;
+            }
+
+            if (e.Result.Semantics.ContainsKey(GridCommandKey) && e.Result.Semantics[GridCommandKey].Value is int gridCommand)
+            {
+                _ = _logger.InfoAsync($"[voice] heard \"{text}\" (confidence {confidence:0.00}) -> grid {(GridCommand)gridCommand}.");
+                GridCommandSpoken?.Invoke((GridCommand)gridCommand);
                 return;
             }
 

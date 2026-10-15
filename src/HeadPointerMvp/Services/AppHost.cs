@@ -22,6 +22,8 @@ public sealed class AppHost : IAsyncDisposable
     private HeadDirectionRouter? _router;
     private Process? _bridgeProcess;
     private VoiceCommandService? _voice;
+    private GridPointerService? _grid;
+    private readonly SynchronizationContext? _ui = SynchronizationContext.Current;
     private float? _latestYaw;
     private bool _disposed;
 
@@ -58,6 +60,9 @@ public sealed class AppHost : IAsyncDisposable
         _router.SmoothedYawChanged += yaw => _latestYaw = yaw;
         _router.MonitorChanged += OnMonitorChanged;
 
+        _grid = new GridPointerService(_pointer, _monitors, _logger);
+        _grid.ActiveChanged += active => _voice?.SetGridMode(active);
+
         await StartPoseSourceAsync(_router);
         await StartHotkeysAsync();
         if (_settings.CameraTrackingEnabled) StartCameraTracking();
@@ -83,16 +88,36 @@ public sealed class AppHost : IAsyncDisposable
 
     private async Task StartHotkeysAsync()
     {
+        _hotkeys = new HotKeyService();
+        TryRegister(_settings.ToggleHotkey, () => _ = ToggleEnabledAsync());
+        TryRegister(_settings.PauseHotkey, () => _ = PauseAsync());
+        TryRegister(_settings.GridHotkey, () => _grid?.Toggle());
+
+        if (_settings.MonitorHotkeysEnabled)
+        {
+            var count = Math.Min(_monitors.GetMonitors().Count, 9);
+            for (var i = 0; i < count; i++)
+            {
+                var index = i;
+                TryRegister($"Ctrl+Alt+D{i + 1}", () => MoveToMonitorExplicit(index, "hotkey"));
+            }
+        }
+
+        await Task.CompletedTask;
+    }
+
+    // One clashing combo must not take the others down with it (it used to abort all registration).
+    private void TryRegister(string shortcut, Action action)
+    {
         try
         {
-            _hotkeys = new HotKeyService();
-            _hotkeys.Register(_settings.ToggleHotkey, () => _ = ToggleEnabledAsync());
-            _hotkeys.Register(_settings.PauseHotkey, () => _ = PauseAsync());
+            _hotkeys!.Register(shortcut, action);
+            _ = _logger.InfoAsync($"Hotkey {shortcut} registered.");
         }
         catch (Exception ex)
         {
-            await _logger.InfoAsync($"Hotkey registration failed: {ex}");
-            _tray?.ShowWarning("HeadPointer hotkeys unavailable", ex.Message);
+            _ = _logger.InfoAsync($"Hotkey {shortcut} unavailable: {ex.Message}");
+            _tray?.ShowWarning("HeadPointer hotkey unavailable", $"{shortcut}: {ex.Message}");
         }
     }
 
@@ -142,6 +167,9 @@ public sealed class AppHost : IAsyncDisposable
 
         _voice = new VoiceCommandService(_logger);
         _voice.MonitorRequested += OnVoiceMonitorRequested;
+        _voice.GridRequested += () => OnUi(() => _grid?.Begin());
+        _voice.GridDigitSpoken += digit => OnUi(() => _grid?.Zoom(digit));
+        _voice.GridCommandSpoken += command => OnUi(() => _grid?.Execute(command));
         _voice.Start(_monitors.GetMonitors().Count, _settings.MicrophoneDeviceId);
     }
 
@@ -154,30 +182,34 @@ public sealed class AppHost : IAsyncDisposable
         _voice = null;
     }
 
-    private void OnVoiceMonitorRequested(int monitorIndex)
-    {
-        if (!_settings.Enabled)
-        {
-            _ = _logger.InfoAsync($"[voice] requested monitor {monitorIndex} but ignored: master 'Enable tracking' is off.");
-            _tray?.ShowWarning("HeadPointer", "Voice command heard, but tracking is paused. Press Ctrl+Alt+H or check 'Enable tracking' in Settings.");
-            return;
-        }
+    private void OnVoiceMonitorRequested(int monitorIndex) => OnUi(() => MoveToMonitorExplicit(monitorIndex, "voice"));
 
+    /// <summary>Speech events arrive on the recognizer's own thread; windows and hooks must be touched on the UI thread.</summary>
+    private void OnUi(Action action)
+    {
+        if (_ui is null) action();
+        else _ui.Post(_ => action(), null);
+    }
+
+    /// <summary>
+    /// Explicit user commands (voice, Ctrl+Alt+digit) always work, even when head tracking is paused --
+    /// 'Enable tracking' only governs the head-driven moves.
+    /// </summary>
+    private void MoveToMonitorExplicit(int monitorIndex, string source)
+    {
         var monitors = _monitors.GetMonitors();
         if (monitorIndex < 0 || monitorIndex >= monitors.Count)
         {
-            _ = _logger.InfoAsync($"[voice] requested monitor {monitorIndex} but only {monitors.Count} monitor(s) detected.");
+            _ = _logger.InfoAsync($"[{source}] requested monitor {monitorIndex} but only {monitors.Count} monitor(s) detected.");
             return;
         }
 
-        if (_pointer is null)
-        {
-            _ = _logger.InfoAsync($"[voice] requested monitor {monitorIndex} but PointerService isn't ready yet.");
-            return;
-        }
+        if (_pointer is null) return;
 
-        _ = _logger.InfoAsync($"[voice] moving to monitor {monitorIndex}.");
+        _ = _logger.InfoAsync($"[{source}] moving to monitor {monitorIndex}.");
+        _grid?.Close();
         _pointer.MoveToMonitor(monitorIndex, _settings.ActivateWindowOnMove, _settings.AllowSimulatedClickActivation);
+        _router?.NotifyExternalMove(monitorIndex);
         OnMonitorChanged(monitorIndex);
     }
 
@@ -282,6 +314,7 @@ public sealed class AppHost : IAsyncDisposable
         _stop.Cancel();
         StopCameraTracking();
         StopVoiceCommands();
+        _grid?.Dispose();
         _bridgeJob.Dispose();
         _tray?.Dispose();
         _hotkeys?.Dispose();

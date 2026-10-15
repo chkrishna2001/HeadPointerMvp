@@ -16,6 +16,8 @@ public sealed class HeadDirectionRouter
     private DateTimeOffset _lastMove;
     private int? _lastTarget;
     private bool _suppressMovement;
+    private float? _pitchBaseline;
+    private DateTimeOffset _holdUntil;
 
     /// <summary>
     /// When true, yaw is still smoothed and broadcast via <see cref="SmoothedYawChanged"/> (so the
@@ -47,6 +49,17 @@ public sealed class HeadDirectionRouter
     /// <summary>Fires with the target monitor index each time the router actually moves the pointer (after dwell/cooldown pass).</summary>
     public event Action<int>? MonitorChanged;
 
+    /// <summary>
+    /// Called when voice, a hotkey or the grid moved the pointer: records that monitor as current so head
+    /// tracking doesn't "correct" it back, and holds head routing briefly so a stale head direction can't undo it.
+    /// </summary>
+    public void NotifyExternalMove(int monitorIndex)
+    {
+        _lastTarget = monitorIndex;
+        _candidateTarget = null;
+        _holdUntil = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(4);
+    }
+
     public void Process(HeadPose pose)
     {
         var settings = _settings();
@@ -58,8 +71,15 @@ public sealed class HeadDirectionRouter
         SmoothedYawChanged?.Invoke(_smoothedYaw.Value);
         if (_suppressMovement) return;
 
+        if (ShouldFreeze(pose, settings))
+        {
+            // Restart the dwell on resume so the first sample after looking back up can't trigger an instant jump.
+            _candidateTarget = null;
+            return;
+        }
+
         var monitors = _monitors.GetMonitors();
-        var target = ResolveTarget(_smoothedYaw.Value, settings, monitors);
+        var target = ResolveTarget(_smoothedYaw.Value, settings, monitors, _lastTarget);
 
         if (_candidateTarget != target)
         {
@@ -79,12 +99,52 @@ public sealed class HeadDirectionRouter
     }
 
     /// <summary>
+    /// True while head movement should be ignored: just after an explicit move, while the user is typing or
+    /// clicking (they are looking at the keys, not a monitor), or while the head is nodded away from its
+    /// usual pitch (looking down at the keyboard).
+    /// </summary>
+    private bool ShouldFreeze(HeadPose pose, AppSettings settings)
+    {
+        if (DateTimeOffset.UtcNow < _holdUntil) return true;
+        if (settings.FreezeHeadWhileTyping && IdleMilliseconds() < settings.TypingFreezeMilliseconds) return true;
+
+        // Slow baseline of "head level" pitch, only learned while not frozen, so the freeze threshold
+        // follows the user's own posture instead of a fixed number.
+        if (_pitchBaseline is null)
+        {
+            _pitchBaseline = pose.PitchDegrees;
+            return false;
+        }
+
+        if (Math.Abs(pose.PitchDegrees - _pitchBaseline.Value) > settings.PitchFreezeUnits) return true;
+        _pitchBaseline += 0.02f * (pose.PitchDegrees - _pitchBaseline.Value);
+        return false;
+    }
+
+    private static long IdleMilliseconds()
+    {
+        var info = new LastInputInfo { Size = (uint)System.Runtime.InteropServices.Marshal.SizeOf<LastInputInfo>() };
+        if (!GetLastInputInfo(ref info)) return long.MaxValue;
+        return unchecked((uint)Environment.TickCount - info.Time);
+    }
+
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+    private struct LastInputInfo
+    {
+        public uint Size;
+        public uint Time;
+    }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool GetLastInputInfo(ref LastInputInfo info);
+
+    /// <summary>
     /// Picks the monitor whose calibrated yaw is closest to the current reading once at least two
     /// monitors are calibrated. This is layout-agnostic: it doesn't assume monitors sit left-to-right
     /// in Windows' arrangement order, only that each one was captured while the user looked at it.
     /// Falls back to the fixed-threshold hop-from-center behavior when calibration is incomplete.
     /// </summary>
-    private static int ResolveTarget(float yaw, AppSettings settings, IReadOnlyList<Screen> monitors)
+    private static int ResolveTarget(float yaw, AppSettings settings, IReadOnlyList<Screen> monitors, int? currentMonitor)
     {
         var calibrated = CalibratedTargets(settings, monitors);
         if (calibrated.Count >= 2)
@@ -99,6 +159,15 @@ public sealed class HeadDirectionRouter
                     best = calibrated[i];
                     bestDistance = distance;
                 }
+            }
+
+            // Hysteresis: stay on the current monitor unless the head is clearly past the midpoint to the
+            // new one (35%/65% instead of 50%/50%), so jitter around a boundary can't flip-flop.
+            foreach (var current in calibrated)
+            {
+                if (current.Index != currentMonitor || current.Index == best.Index) continue;
+                var gap = Math.Abs(current.Yaw - best.Yaw);
+                if (Math.Abs(current.Yaw - yaw) <= bestDistance + (0.3f * gap)) return current.Index;
             }
 
             return best.Index;

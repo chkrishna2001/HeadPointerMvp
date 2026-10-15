@@ -100,20 +100,36 @@ internal static class Program
             if (faces.Rows > 0 && faces.At<float>(0, ScoreCol) >= ScoreThreshold)
             {
                 var rightEyeX = faces.At<float>(0, RightEyeXCol);
+                var rightEyeY = faces.At<float>(0, RightEyeXCol + 1);
                 var leftEyeX = faces.At<float>(0, LeftEyeXCol);
+                var leftEyeY = faces.At<float>(0, LeftEyeXCol + 1);
                 var noseX = faces.At<float>(0, NoseXCol);
+                var noseY = faces.At<float>(0, NoseXCol + 1);
 
-                var eyeMidX = (leftEyeX + rightEyeX) / 2.0;
-                var eyeDistance = Math.Max(Math.Abs(rightEyeX - leftEyeX), 0.001);
-                var yaw = (noseX - eyeMidX) / eyeDistance * 45.0;
+                // Measure the nose offset along and across the eye line instead of the raw image x/y, so
+                // tilting the head (roll) can't masquerade as a turn (yaw) or a nod (pitch).
+                var axisX = (double)(leftEyeX - rightEyeX);
+                var axisY = (double)(leftEyeY - rightEyeY);
+                if (axisX < 0) { axisX = -axisX; axisY = -axisY; }
+                var eyeDistance = Math.Max(Math.Sqrt((axisX * axisX) + (axisY * axisY)), 0.001);
+                var ux = axisX / eyeDistance;
+                var uy = axisY / eyeDistance;
+                var offsetX = noseX - ((leftEyeX + rightEyeX) / 2.0);
+                var offsetY = noseY - ((leftEyeY + rightEyeY) / 2.0);
+
+                var yaw = ((offsetX * ux) + (offsetY * uy)) / eyeDistance * 45.0;
+                // Nose drop below the eye line, in the same arbitrary units. Looking down at the keyboard
+                // shifts this a lot; the tray app uses its deviation from a running baseline to freeze routing.
+                var pitch = ((offsetY * ux) - (offsetX * uy)) / eyeDistance * 45.0;
+                var roll = Math.Atan2(axisY, axisX) * 180.0 / Math.PI;
                 if (options.InvertYaw) yaw = -yaw;
 
-                var packet = JsonSerializer.SerializeToUtf8Bytes(new { yaw, pitch = 0.0, roll = 0.0 });
+                var packet = JsonSerializer.SerializeToUtf8Bytes(new { yaw, pitch, roll });
                 udp.Send(packet, packet.Length, target);
 
                 if ((DateTime.UtcNow - lastPrint).TotalSeconds > 1)
                 {
-                    Console.WriteLine($"yaw={yaw,6:0.0}");
+                    Console.WriteLine($"yaw={yaw,6:0.0} pitch={pitch,6:0.0}");
                     lastPrint = DateTime.UtcNow;
                 }
             }

@@ -16,6 +16,32 @@ public sealed partial class PointerService(MonitorService monitors, FileLogger l
         if (activateWindow) ActivateTopWindow(screen, allowSimulatedClickActivation);
     }
 
+    public enum ClickKind
+    {
+        Left,
+        Right,
+        Double
+    }
+
+    /// <summary>Moves the cursor to a screen point and performs a real click there (used by the zoom grid).</summary>
+    public void ClickAt(int x, int y, ClickKind kind)
+    {
+        SetCursorPos(x, y);
+        var (down, up) = kind == ClickKind.Right ? (MouseEventFRightDown, MouseEventFRightUp) : (MouseEventFLeftDown, MouseEventFLeftUp);
+        var count = kind == ClickKind.Double ? 2 : 1;
+        var events = new List<Input>();
+        for (var i = 0; i < count; i++)
+        {
+            events.Add(MouseInput(down));
+            events.Add(MouseInput(up));
+        }
+
+        var sent = SendInput((uint)events.Count, events.ToArray(), InputSize);
+        if (sent != events.Count) _ = logger.InfoAsync($"[grid] click blocked: {sent}/{events.Count} events sent (Win32 error {Marshal.GetLastWin32Error()}).");
+    }
+
+    public void MoveTo(int x, int y) => SetCursorPos(x, y);
+
     /// <summary>
     /// Brings the topmost visible window overlapping the target monitor to the foreground, so typing
     /// after a head-tracking move lands in that window.
@@ -257,6 +283,8 @@ public sealed partial class PointerService(MonitorService monitors, FileLogger l
     private const int WsExToolWindow = 0x00000080;
     private const uint InputTypeMouse = 0;
     private const uint InputTypeKeyboard = 1;
+    private const uint MouseEventFLeftDown = 0x0002;
+    private const uint MouseEventFLeftUp = 0x0004;
     private const uint MouseEventFRightDown = 0x0008;
     private const uint MouseEventFRightUp = 0x0010;
     private const uint KeyEventFKeyUp = 0x0002;

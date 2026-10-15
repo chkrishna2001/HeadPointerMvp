@@ -21,6 +21,15 @@ public sealed class AppSettings
     public bool VoiceCommandsEnabled { get; set; }
     /// <summary>WASAPI capture device ID for voice commands. Empty means "follow Windows' system default recording device" (SetInputToDefaultAudioDevice).</summary>
     public string MicrophoneDeviceId { get; set; } = string.Empty;
+    /// <summary>Ignore head movement while the keyboard/mouse was used recently (looking down at the keys must not move the pointer).</summary>
+    public bool FreezeHeadWhileTyping { get; set; } = true;
+    public int TypingFreezeMilliseconds { get; set; } = 2500;
+    /// <summary>How far (in bridge pitch units) the head may nod from its running baseline before routing is frozen.</summary>
+    public float PitchFreezeUnits { get; set; } = 6;
+    /// <summary>Opens the numbered zoom-grid for hands-free pointing. Digits 1-9 zoom in, Enter clicks, Esc cancels.</summary>
+    public string GridHotkey { get; set; } = "Ctrl+Alt+G";
+    /// <summary>Ctrl+Alt+1..9 jump straight to that monitor (1-indexed). Turn off if the combos clash with other software.</summary>
+    public bool MonitorHotkeysEnabled { get; set; } = true;
     public string ToggleHotkey { get; set; } = "Ctrl+Alt+H";
     public string PauseHotkey { get; set; } = "Ctrl+Alt+P";
 }
