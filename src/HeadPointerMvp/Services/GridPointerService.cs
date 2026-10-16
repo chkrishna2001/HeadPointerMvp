@@ -166,6 +166,7 @@ public sealed class GridPointerService(PointerService pointer, MonitorService mo
             var vk = Marshal.ReadInt32(lParam);
             var message = wParam.ToInt32();
             var isDown = message is WmKeyDown or WmSysKeyDown;
+            if ((Marshal.ReadInt32(lParam, 8) & 0x10) != 0) return CallNextHookEx(_hook, code, wParam, lParam); // our own injected keys (voice 'press ...') pass through
 
             if (!isDown && _swallowedKeys.Remove(vk)) return 1; // swallow the matching key-up too
 

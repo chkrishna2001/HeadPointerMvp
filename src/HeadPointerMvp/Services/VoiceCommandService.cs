@@ -14,6 +14,20 @@ namespace HeadPointerMvp.Services;
 /// ignored. Two grammars exist: everyday (grid / monitor N) and grid mode (digits and click commands,
 /// speakable in one breath: "five five five click"). Only the active one is fed audio.
 /// </summary>
+public enum VoiceIntentKind
+{
+    Grid,
+    Monitor,
+    Press,
+    Click,
+    RightClick,
+    DoubleClick,
+    ScrollUp,
+    ScrollDown
+}
+
+public readonly record struct VoiceIntent(VoiceIntentKind Kind, int Index = 0, string Chord = "");
+
 public sealed class VoiceCommandService : IDisposable
 {
     private const int TargetSampleRate = 16000;
@@ -27,16 +41,17 @@ public sealed class VoiceCommandService : IDisposable
     private Task? _pumpTask;
     private Model? _model;
     private volatile bool _gridMode;
+    private string[] _wakeWords = [];
+    private readonly Dictionary<string, VoiceIntent> _commands = new(StringComparer.Ordinal);
+    private int _longestCommand = 1;
 
     public VoiceCommandService(FileLogger logger) => _logger = logger;
 
     public static string ModelPath => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "HeadPointerMvp", "models", ModelFolderName);
 
-    public event Action<int>? MonitorRequested;
-
-    /// <summary>"grid" / "mouse grid" / "show grid".</summary>
-    public event Action? GridRequested;
+    /// <summary>A wake-word command was spoken ("rama press enter"). Raised on the recognizer thread.</summary>
+    public event Action<VoiceIntent>? IntentRaised;
 
     /// <summary>A digit 1..9 spoken while the grid is open.</summary>
     public event Action<int>? GridDigitSpoken;
@@ -68,7 +83,7 @@ public sealed class VoiceCommandService : IDisposable
     }
 
     /// <param name="microphoneDeviceId">Empty/null follows Windows' default recording device. Otherwise a WASAPI device ID from <see cref="ListMicrophones"/>.</param>
-    public void Start(int monitorCount, string? microphoneDeviceId = null)
+    public void Start(int monitorCount, string? microphoneDeviceId, string wakeWord, IReadOnlyDictionary<string, string> macros)
     {
         if (monitorCount <= 0 || _pumpTask is not null) return;
 
@@ -83,14 +98,25 @@ public sealed class VoiceCommandService : IDisposable
             Vosk.Vosk.SetLogLevel(-1);
             _model = new Model(ModelPath);
             var count = Math.Min(monitorCount, NumberWords.Length);
-            var normalGrammar = BuildGrammar(["grid", "mouse grid", "show grid", "pointer grid", .. MonitorPhrases(count)]);
+
+            _wakeWords = wakeWord.ToLowerInvariant().Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            var missing = _wakeWords.Where(w => _model.FindWord(w) < 0).ToArray();
+            if (_wakeWords.Length == 0 || missing.Length > 0)
+            {
+                _ = _logger.InfoAsync($"Voice commands unavailable: wake word \"{wakeWord}\" is not in the speech model's vocabulary ({string.Join(", ", missing)}). Pick another word in settings.json (VoiceWakeWord).");
+                StopAll();
+                return;
+            }
+
+            BuildCommands(count, macros);
+            var normalGrammar = BuildGrammar(_commands.Keys.Select(phrase => $"{string.Join(' ', _wakeWords)} {phrase}"));
             var gridGrammar = BuildGrammar([.. NumberWords.Take(9), "click", "select", "right click", "double click", "back", "undo", "cancel", "close grid", "next monitor"]);
 
             var pcm = StartCapture(microphoneDeviceId);
             _pumpCts = new CancellationTokenSource();
             var token = _pumpCts.Token;
             _pumpTask = Task.Run(() => RecognitionLoop(pcm, normalGrammar, gridGrammar, token), CancellationToken.None);
-            _ = _logger.InfoAsync($"Voice commands listening (Vosk offline): \"grid\", \"monitor one..{NumberWords[count - 1]}\"; once the grid is open: digits, click, back, cancel.");
+            _ = _logger.InfoAsync($"Voice commands listening (Vosk offline). Say \"{wakeWord}\" + a command (show grid, monitor N, press <key>, click, scroll, macros); once the grid is open, digits/click/back/cancel need no wake word.");
         }
         catch (Exception ex)
         {
@@ -99,13 +125,50 @@ public sealed class VoiceCommandService : IDisposable
         }
     }
 
-    private static IEnumerable<string> MonitorPhrases(int count)
+    private static readonly (string Spoken, string Key)[] SpokenKeys =
+    [
+        ("enter", "Enter"), ("tab", "Tab"), ("escape", "Escape"), ("space", "Space"), ("back space", "Back"), ("delete", "Delete"),
+        ("up", "Up"), ("down", "Down"), ("left", "Left"), ("right", "Right"), ("home", "Home"), ("end", "End"),
+        ("page up", "PageUp"), ("page down", "PageDown")
+    ];
+
+    private static readonly (string Spoken, string Chord)[] SpokenModifiers =
+        [("", ""), ("control ", "Ctrl+"), ("alt ", "Alt+"), ("shift ", "Shift+"), ("control shift ", "Ctrl+Shift+"), ("control alt ", "Ctrl+Alt+")];
+
+    /// <summary>The command table: everything that can follow the wake word. Phrases using words the model doesn't know are dropped (and logged).</summary>
+    private void BuildCommands(int monitorCount, IReadOnlyDictionary<string, string> macros)
     {
-        for (var i = 0; i < count; i++)
+        _commands.Clear();
+        var dropped = new List<string>();
+
+        void Add(string phrase, VoiceIntent intent)
         {
-            yield return $"monitor {NumberWords[i]}";
-            yield return $"m {NumberWords[i]}";
+            phrase = phrase.ToLowerInvariant().Trim();
+            if (phrase.Split(' ').Any(word => _model!.FindWord(word) < 0)) dropped.Add(phrase);
+            else _commands[phrase] = intent;
         }
+
+        foreach (var phrase in new[] { "grid", "show grid", "mouse grid", "pointer grid" }) Add(phrase, new VoiceIntent(VoiceIntentKind.Grid));
+        for (var i = 0; i < monitorCount; i++)
+        {
+            Add($"monitor {NumberWords[i]}", new VoiceIntent(VoiceIntentKind.Monitor, i));
+            Add($"m {NumberWords[i]}", new VoiceIntent(VoiceIntentKind.Monitor, i));
+        }
+
+        foreach (var (spokenModifier, chordModifier) in SpokenModifiers)
+        {
+            foreach (var (spokenKey, key) in SpokenKeys) Add($"press {spokenModifier}{spokenKey}", new VoiceIntent(VoiceIntentKind.Press, 0, chordModifier + key));
+        }
+
+        Add("click", new VoiceIntent(VoiceIntentKind.Click));
+        Add("right click", new VoiceIntent(VoiceIntentKind.RightClick));
+        Add("double click", new VoiceIntent(VoiceIntentKind.DoubleClick));
+        Add("scroll up", new VoiceIntent(VoiceIntentKind.ScrollUp));
+        Add("scroll down", new VoiceIntent(VoiceIntentKind.ScrollDown));
+        foreach (var (phrase, chord) in macros) Add(phrase, new VoiceIntent(VoiceIntentKind.Press, 0, chord));
+
+        _longestCommand = _commands.Keys.Max(phrase => phrase.Count(c => c == ' ') + 1);
+        if (dropped.Count > 0) _ = _logger.InfoAsync($"Voice phrases dropped (word not in the speech model): {string.Join("; ", dropped)}.");
     }
 
     private static string BuildGrammar(IEnumerable<string> phrases) => JsonSerializer.Serialize(phrases.Append(Unknown));
@@ -186,22 +249,52 @@ public sealed class VoiceCommandService : IDisposable
         }
     }
 
+    /// <summary>
+    /// Only words after the wake word count; anything before it is ignored, so "I'll press enter later"
+    /// does nothing but "rama press enter" does. Several commands may follow one wake word, and a second
+    /// wake word starts over.
+    /// </summary>
     private void DispatchNormal(string[] words)
     {
-        for (var i = 0; i < words.Length; i++)
+        var i = 0;
+        var awake = false;
+        while (i < words.Length)
         {
-            if (words[i] == "grid")
+            if (MatchesAt(words, i, _wakeWords))
             {
-                GridRequested?.Invoke();
+                awake = true;
+                i += _wakeWords.Length;
+                continue;
             }
-            else if (words[i] is "monitor" or "m" && i + 1 < words.Length)
+
+            if (!awake)
             {
-                var index = Array.IndexOf(NumberWords, words[i + 1]);
-                if (index < 0) continue;
-                MonitorRequested?.Invoke(index);
                 i++;
+                continue;
             }
+
+            var matched = false;
+            for (var length = Math.Min(_longestCommand, words.Length - i); length >= 1 && !matched; length--)
+            {
+                if (!_commands.TryGetValue(string.Join(' ', words.Skip(i).Take(length)), out var intent)) continue;
+                IntentRaised?.Invoke(intent);
+                i += length;
+                matched = true;
+            }
+
+            if (!matched) i++;
         }
+    }
+
+    private static bool MatchesAt(string[] words, int index, string[] phrase)
+    {
+        if (index + phrase.Length > words.Length) return false;
+        for (var k = 0; k < phrase.Length; k++)
+        {
+            if (words[index + k] != phrase[k]) return false;
+        }
+
+        return true;
     }
 
     /// <summary>One utterance can hold several commands ("five five five click"); they are applied in order.</summary>

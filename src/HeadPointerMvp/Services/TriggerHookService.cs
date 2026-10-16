@@ -74,6 +74,7 @@ public sealed class TriggerHookService(FileLogger logger, Action<Action> post) :
         {
             var vk = Marshal.ReadInt32(lParam);
             var message = wParam.ToInt32();
+            if ((Marshal.ReadInt32(lParam, 8) & 0x10) != 0) return CallNextHookEx(_keyboardHook, code, wParam, lParam);
             if (message is WmKeyDown or WmSysKeyDown)
             {
                 var modifiers = CurrentModifiers();

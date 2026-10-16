@@ -42,6 +42,57 @@ public sealed partial class PointerService(MonitorService monitors, FileLogger l
 
     public void MoveTo(int x, int y) => SetCursorPos(x, y);
 
+    /// <summary>Clicks at the pointer's current position.</summary>
+    public void ClickHere(ClickKind kind)
+    {
+        var point = Cursor.Position;
+        ClickAt(point.X, point.Y, kind);
+    }
+
+    /// <summary>Mouse-wheel scroll at the pointer: positive notches scroll up, negative down.</summary>
+    public void Scroll(int notches)
+    {
+        var wheel = MouseInput(MouseEventFWheel);
+        wheel.Union.Mouse.MouseData = unchecked((uint)(notches * 120));
+        SendInput(1, [wheel], InputSize);
+    }
+
+    /// <summary>
+    /// Presses a key combination such as "Enter" or "Ctrl+Shift+Tab" in whatever window has focus (a
+    /// full-screen remote desktop forwards it to the remote machine). Modifiers go down first, up last.
+    /// </summary>
+    public bool SendChord(string chord)
+    {
+        var keys = new List<ushort>();
+        foreach (var part in chord.Split('+', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+        {
+            switch (part.ToLowerInvariant())
+            {
+                case "ctrl" or "control": keys.Add(0x11); break;
+                case "alt": keys.Add(0x12); break;
+                case "shift": keys.Add(0x10); break;
+                case "win": keys.Add(0x5B); break;
+                default:
+                    if (!Enum.TryParse<Keys>(part, true, out var key))
+                    {
+                        _ = logger.InfoAsync($"[keys] unknown key '{part}' in chord '{chord}'.");
+                        return false;
+                    }
+
+                    keys.Add((ushort)key);
+                    break;
+            }
+        }
+
+        if (keys.Count == 0) return false;
+        var events = new List<Input>();
+        foreach (var key in keys) events.Add(KeyInput(key, keyUp: false));
+        for (var i = keys.Count - 1; i >= 0; i--) events.Add(KeyInput(keys[i], keyUp: true));
+        var sent = SendInput((uint)events.Count, events.ToArray(), InputSize);
+        if (sent != events.Count) _ = logger.InfoAsync($"[keys] '{chord}' blocked: {sent}/{events.Count} events sent (Win32 error {Marshal.GetLastWin32Error()}).");
+        return sent == events.Count;
+    }
+
     /// <summary>
     /// Brings the topmost visible window overlapping the target monitor to the foreground, so typing
     /// after a head-tracking move lands in that window.
@@ -162,6 +213,9 @@ public sealed partial class PointerService(MonitorService monitors, FileLogger l
         }
     }
 
+    // Arrow/navigation keys must carry the extended flag, or apps may see the numpad variants instead.
+    private static bool IsExtendedKey(ushort vk) => vk is >= 0x21 and <= 0x28 or 0x2D or 0x2E or 0x5B;
+
     private static Input MouseInput(uint flags) => new()
     {
         Type = InputTypeMouse,
@@ -171,7 +225,7 @@ public sealed partial class PointerService(MonitorService monitors, FileLogger l
     private static Input KeyInput(ushort virtualKey, bool keyUp) => new()
     {
         Type = InputTypeKeyboard,
-        Union = new InputUnion { Keyboard = new KeyboardInputData { VirtualKey = virtualKey, Flags = keyUp ? KeyEventFKeyUp : 0 } }
+        Union = new InputUnion { Keyboard = new KeyboardInputData { VirtualKey = virtualKey, Flags = (keyUp ? KeyEventFKeyUp : 0) | (IsExtendedKey(virtualKey) ? KeyEventFExtendedKey : 0) } }
     };
 
     // The taskbar and desktop host windows are always-on-top/always-present, so they'd otherwise win
@@ -288,6 +342,8 @@ public sealed partial class PointerService(MonitorService monitors, FileLogger l
     private const uint MouseEventFRightDown = 0x0008;
     private const uint MouseEventFRightUp = 0x0010;
     private const uint KeyEventFKeyUp = 0x0002;
+    private const uint KeyEventFExtendedKey = 0x0001;
+    private const uint MouseEventFWheel = 0x0800;
     private const ushort VkEscape = 0x1B;
     private const uint MonitorDefaultToNearest = 2;
 

@@ -195,23 +195,52 @@ public sealed class AppHost : IAsyncDisposable
         if (_voice is not null) return;
 
         _voice = new VoiceCommandService(_logger);
-        _voice.MonitorRequested += OnVoiceMonitorRequested;
-        _voice.GridRequested += () => OnUi(() => _grid?.Begin());
+        _voice.IntentRaised += intent => OnUi(() => HandleVoiceIntent(intent));
         _voice.GridDigitSpoken += digit => OnUi(() => _grid?.Zoom(digit));
         _voice.GridCommandSpoken += command => OnUi(() => _grid?.Execute(command));
-        _voice.Start(_monitors.GetMonitors().Count, _settings.MicrophoneDeviceId);
+        _voice.Start(_monitors.GetMonitors().Count, _settings.MicrophoneDeviceId, _settings.VoiceWakeWord, _settings.VoiceMacros);
     }
 
     private void StopVoiceCommands()
     {
         if (_voice is null) return;
 
-        _voice.MonitorRequested -= OnVoiceMonitorRequested;
         _voice.Dispose();
         _voice = null;
     }
 
-    private void OnVoiceMonitorRequested(int monitorIndex) => OnUi(() => MoveToMonitorExplicit(monitorIndex, "voice"));
+    private void HandleVoiceIntent(VoiceIntent intent)
+    {
+        if (_pointer is null) return;
+        switch (intent.Kind)
+        {
+            case VoiceIntentKind.Grid:
+                _grid?.Begin();
+                break;
+            case VoiceIntentKind.Monitor:
+                MoveToMonitorExplicit(intent.Index, "voice");
+                break;
+            case VoiceIntentKind.Press:
+                _ = _logger.InfoAsync($"[voice] pressing {intent.Chord}.");
+                _pointer.SendChord(intent.Chord);
+                break;
+            case VoiceIntentKind.Click:
+                _pointer.ClickHere(PointerService.ClickKind.Left);
+                break;
+            case VoiceIntentKind.RightClick:
+                _pointer.ClickHere(PointerService.ClickKind.Right);
+                break;
+            case VoiceIntentKind.DoubleClick:
+                _pointer.ClickHere(PointerService.ClickKind.Double);
+                break;
+            case VoiceIntentKind.ScrollUp:
+                _pointer.Scroll(5);
+                break;
+            case VoiceIntentKind.ScrollDown:
+                _pointer.Scroll(-5);
+                break;
+        }
+    }
 
     /// <summary>Speech events arrive on the recognizer's own thread; windows and hooks must be touched on the UI thread.</summary>
     private void OnUi(Action action)

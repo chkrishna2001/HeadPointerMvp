@@ -36,6 +36,22 @@ public sealed class AppSettings
     public bool HeadTiltOpensGrid { get; set; }
     public float TiltDegrees { get; set; } = 15;
     public int TiltHoldMilliseconds { get; set; } = 1200;
+    /// <summary>Voice commands only act when preceded by this word ("rama show grid"), so dictation and conversation are never touched. May be two words ("sri ram"). Must exist in the speech model's vocabulary.</summary>
+    public string VoiceWakeWord { get; set; } = "rama";
+    /// <summary>Spoken phrase -> key combination, e.g. "next tab": "Ctrl+Tab". Said as "rama next tab". Edit in settings.json.</summary>
+    public Dictionary<string, string> VoiceMacros { get; set; } = new()
+    {
+        ["next tab"] = "Ctrl+Tab",
+        ["previous tab"] = "Ctrl+Shift+Tab",
+        ["close tab"] = "Ctrl+W",
+        ["new tab"] = "Ctrl+T",
+        ["switch window"] = "Alt+Tab",
+        ["copy"] = "Ctrl+C",
+        ["paste"] = "Ctrl+V",
+        ["select all"] = "Ctrl+A",
+        ["save"] = "Ctrl+S",
+        ["undo that"] = "Ctrl+Z"
+    };
     public string ToggleHotkey { get; set; } = "Ctrl+Alt+H";
     public string PauseHotkey { get; set; } = "Ctrl+Alt+P";
 }

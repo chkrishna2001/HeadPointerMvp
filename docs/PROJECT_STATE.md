@@ -1,6 +1,6 @@
 # HeadPointerMvp — project state
 
-Last updated 2026-10-16 by "Vosk voice engine, camera off by default"
+Last updated 2026-10-16 by "wake-word voice commands (press keys, click, scroll, macros)"
 
 ## Purpose & shape
 Windows tray app (WinForms, .NET 8) for multi-monitor, low-mouse use. Voice (Vosk offline, closed grammar, NAudio capture) and hotkeys pick a monitor; webcam head yaw (CameraBridge process, OpenCvSharp+YuNet → UDP 127.0.0.1:11573) can too but is OFF by default (user: camera isn't best); a numbered zoom grid points/clicks anywhere.
@@ -19,6 +19,8 @@ Build: `dotnet build HeadPointerMvp.sln`. Settings: `%LocalAppData%\HeadPointerM
 - Voice moved from SAPI (rejected ~half of commands) to Vosk `vosk-model-small-en-us-0.15` (model NOT in git: lives in `%LocalAppData%\HeadPointerMvp\models\`; re-download from alphacephei.com/vosk/models if missing). Two grammars: everyday ("grid", "monitor N") and grid mode (digits, click, right/double click, back, cancel, next monitor), chainable in one breath ("five five five click"). Verified offline with synthetic speech; not yet by real mic.
 - Camera tracking and head tilt default off (user's settings.json updated).
 
+- Wake-word voice: everything is spoken as `<wake word> <command>` (default "rama", `VoiceWakeWord`, may be two words, must be in the Vosk vocab - checked at start via FindWord). Commands: show grid, monitor N, `press [control|alt|shift|control shift] <enter|tab|escape|space|back space|delete|arrows|home|end|page up/down>`, click, right click, double click, scroll up/down, plus `VoiceMacros` (phrase -> chord, in settings.json). Several commands chain after one wake word. Speech without the wake word is ignored, so dictation is untouched; grid mode is the only part that needs no wake word (digits, click, back, cancel). Keys are injected with SendInput (flagged injected; our hooks pass those through).
+
 ## In progress
 Nothing. NOT yet verified on screen: grid rendering, digit/Enter/voice flow, hysteresis/typing-freeze feel. Build is clean (0 warnings).
 
@@ -29,14 +31,15 @@ Nothing. NOT yet verified on screen: grid rendering, digit/Enter/voice flow, hys
 - Recalibrate monitors in Settings (yaw formula changed slightly).
 - Settings UI for the new settings (currently JSON-only).
 - "Show numbers" mode: UI Automation clickable elements labelled with numbers (the other half of Apple Voice Control).
-- Tune Vosk by real use (`[voice] heard` lines); consider hot-word safety (e.g. require 'grid' prefix) if false triggers appear.
+- Settings UI for wake word/macros (JSON-only now). Claude desktop's own session-switch shortcuts still unknown: add as VoiceMacros once found.
+- Tune Vosk by real use (`[voice] heard` lines); consider a different wake word if 'rama' mis-fires.
 - Model auto-download/installer step; README still describes SAPI.
 
 ## Last session
-User confirmed mouse button, Ctrl+Alt+G, grid work with the cloud PC focused; voice (SAPI) was flaky. Swapped to Vosk; builds clean, app starts and listens on the Logi headset mic. Never inject keys from the agent: the user works in a live remote session.
+User confirmed mouse button, Ctrl+Alt+G, grid work with the cloud PC focused; voice (SAPI) was flaky. Swapped to Vosk, then added the wake word; builds clean, app starts and listens on the Logi headset mic. Offline TTS test showed wake-word phrases parse and non-wake speech is ignored. Never inject keys from the agent: the user works in a live remote session.
 
 ## Next task
-Real-mic voice test with Windows App focused: say 'grid', then 'five five five click'; done when log shows `[voice] heard` and `[grid] Left click` and the click lands within a few px. Then Step 2/3 (show numbers, voice macros).
+Real-mic voice test with Windows App focused: say 'rama show grid', then 'five five five click'; also 'rama press tab', 'rama scroll down'; done when log shows `[voice] heard` and `[grid] Left click` and the click lands within a few px. Then Step 2/3 (show numbers, voice macros).
 
 ## Decisions & gotchas
 - Swallowed Ctrl+Alt+G still lets the remote see Ctrl+Alt down/up (only the G is eaten); harmless so far.
