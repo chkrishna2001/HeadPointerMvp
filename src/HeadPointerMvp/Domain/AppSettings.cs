@@ -17,7 +17,7 @@ public sealed class AppSettings
     public bool ActivateWindowOnMove { get; set; } = true;
     public bool AllowSimulatedClickActivation { get; set; } = true;
     public bool NotifyOnMonitorChange { get; set; } = true;
-    public bool CameraTrackingEnabled { get; set; } = true;
+    public bool CameraTrackingEnabled { get; set; }
     public bool VoiceCommandsEnabled { get; set; }
     /// <summary>WASAPI capture device ID for voice commands. Empty means "follow Windows' system default recording device" (SetInputToDefaultAudioDevice).</summary>
     public string MicrophoneDeviceId { get; set; } = string.Empty;
@@ -33,7 +33,7 @@ public sealed class AppSettings
     /// <summary>Mouse side button that opens/closes the grid and is swallowed system-wide: "XButton1" (back), "XButton2" (forward) or "None".</summary>
     public string GridMouseButton { get; set; } = "XButton2";
     /// <summary>Tilt your head sideways and hold to open/close the grid. Works with a remote desktop focused.</summary>
-    public bool HeadTiltOpensGrid { get; set; } = true;
+    public bool HeadTiltOpensGrid { get; set; }
     public float TiltDegrees { get; set; } = 15;
     public int TiltHoldMilliseconds { get; set; } = 1200;
     public string ToggleHotkey { get; set; } = "Ctrl+Alt+H";

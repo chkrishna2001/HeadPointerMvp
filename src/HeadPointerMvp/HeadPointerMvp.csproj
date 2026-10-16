@@ -13,8 +13,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- Offline, built-in Windows speech recognition for the voice-command input method. -->
-    <PackageReference Include="System.Speech" Version="8.0.0" />
+    <!-- Offline speech recognition (Kaldi) for voice commands; needs the model folder in %LocalAppData%\HeadPointerMvp\models. -->
+    <PackageReference Include="Vosk" Version="0.3.38" />
     <!-- WASAPI capture + resampling, so voice commands can listen on a specific chosen microphone
          instead of always following whatever Windows' system-wide default recording device is. -->
     <PackageReference Include="NAudio" Version="2.2.1" />
