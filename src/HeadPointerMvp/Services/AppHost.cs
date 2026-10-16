@@ -206,31 +206,36 @@ public sealed class AppHost : IAsyncDisposable
     private void VoiceFeedback(string kind, string text)
     {
         _ = _logger.InfoAsync($"[voice] feedback: {kind} {text}".TrimEnd());
-        _ = Task.Run(() =>
+        var tones = kind switch
         {
-            try
+            "wake" => new[] { (900, 90) },
+            "ok" => new[] { (700, 70), (1100, 90) },
+            "miss" => new[] { (220, 250) },
+            _ => Array.Empty<(int, int)>()
+        };
+        _ = Task.Run(() => PlayTones(tones));
+    }
+
+    /// <summary>Plays beeps through the default output device (Console.Beep is silent for a tray app on many setups).</summary>
+    private void PlayTones((int Hz, int Ms)[] tones)
+    {
+        try
+        {
+            foreach (var (hz, ms) in tones)
             {
-                switch (kind)
-                {
-                    case "wake":
-                        Console.Beep(900, 90);
-                        break;
-                    case "ok":
-                        Console.Beep(700, 70);
-                        Console.Beep(1100, 90);
-                        break;
-                    case "miss":
-                        Console.Beep(220, 250);
-                        break;
-                }
+                var tone = new NAudio.Wave.SampleProviders.OffsetSampleProvider(
+                    new NAudio.Wave.SampleProviders.SignalGenerator(44100, 1) { Type = NAudio.Wave.SampleProviders.SignalGeneratorType.Sin, Frequency = hz, Gain = 0.3 })
+                { Take = TimeSpan.FromMilliseconds(ms) };
+                using var output = new NAudio.Wave.WaveOutEvent();
+                output.Init(tone);
+                output.Play();
+                while (output.PlaybackState == NAudio.Wave.PlaybackState.Playing) Thread.Sleep(10);
             }
-            catch
-            {
-                // No beep device; the balloon below still tells the user.
-            }
-        });
-        if (kind == "ok") OnUi(() => _tray?.ShowBalloon("Voice", text));
-        else if (kind == "miss") OnUi(() => _tray?.ShowBalloon("Voice", "Heard the wake word but no command"));
+        }
+        catch (Exception ex)
+        {
+            _ = _logger.InfoAsync($"[voice] feedback sound failed: {ex.Message}");
+        }
     }
 
     private void StopVoiceCommands()

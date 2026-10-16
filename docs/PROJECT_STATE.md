@@ -24,7 +24,7 @@ Build: `dotnet build HeadPointerMvp.sln`. Settings: `%LocalAppData%\HeadPointerM
 - Voice tuning (all from real logs): wake word opens a 5 s window and half-heard commands carry over (the engine splits at every pause); utterances are force-closed when partial text is stable 0.7 s (noisy mic never reached silence); grid mode also accepts wake-prefixed commands; 'tap'/'enter' also click in grid mode; log lines show peak and live input level. Verified by user: 'rama show grid', digits, 'click' -> real click, at 65% mic level.
 
 - Noise robustness: prefers `vosk-model-en-us-0.22-lgraph` (~128 MB, in models folder, falls back to small); noise gate (adaptive floor, gated audio becomes silence); per-word confidence filter (0.4, dropped words logged). Built OK but NOT yet verified by real mic (app was running, exe locked: close it, rebuild, test).
-- Voice feedback: wake word -> rising beep, command ran -> double chirp + tray balloon with the phrase, wake without command in 5 s -> low buzz (`VoiceCommandService.Feedback` -> `AppHost.VoiceFeedback`). Keys also work without "press" ("rama alt tab"), since the recognizer often drops "press". Not yet verified by ear.
+- Voice feedback: wake word -> rising beep, command ran -> double chirp (NAudio tones on the default output; Console.Beep was inaudible; tray balloons rejected as annoying), wake without command in 5 s -> low buzz (`VoiceCommandService.Feedback` -> `AppHost.VoiceFeedback`). Keys also work without "press" ("rama alt tab"), since the recognizer often drops "press". Not yet verified by ear.
 
 ## In progress
 Nothing. NOT yet verified on screen: grid rendering, digit/Enter/voice flow, hysteresis/typing-freeze feel. Build is clean (0 warnings).
