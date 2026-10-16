@@ -32,7 +32,11 @@ public readonly record struct VoiceIntent(VoiceIntentKind Kind, int Index = 0, s
 public sealed class VoiceCommandService : IDisposable
 {
     private const int TargetSampleRate = 16000;
-    private const string ModelFolderName = "vosk-model-small-en-us-0.15";
+    // Best first: the dynamic-graph model is far more accurate than the small one and supports our runtime grammar.
+    private static readonly string[] ModelFolderNames = ["vosk-model-en-us-0.22-lgraph", "vosk-model-small-en-us-0.15"];
+    private const double MinSpeechRms = 450;       // absolute floor (16-bit units) below which nothing counts as speech
+    private const double SpeechOverNoise = 2.5;    // chunk must be this many times louder than the tracked noise floor
+    private const double MinWordConfidence = 0.4;
     private const string Unknown = "[unk]";
     private static readonly string[] NumberWords = ["one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten"];
 
@@ -55,8 +59,11 @@ public sealed class VoiceCommandService : IDisposable
 
     public VoiceCommandService(FileLogger logger) => _logger = logger;
 
-    public static string ModelPath => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "HeadPointerMvp", "models", ModelFolderName);
+    private static string ModelsRoot => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "HeadPointerMvp", "models");
+
+    public static string ModelPath => ModelFolderNames.Select(name => Path.Combine(ModelsRoot, name)).FirstOrDefault(Directory.Exists)
+        ?? Path.Combine(ModelsRoot, ModelFolderNames[0]);
 
     /// <summary>A wake-word command was spoken ("rama press enter"). Raised on the recognizer thread.</summary>
     public event Action<VoiceIntent>? IntentRaised;
@@ -105,6 +112,7 @@ public sealed class VoiceCommandService : IDisposable
         {
             Vosk.Vosk.SetLogLevel(-1);
             _model = new Model(ModelPath);
+            _ = _logger.InfoAsync($"Voice model: {Path.GetFileName(ModelPath)}.");
             var count = Math.Min(monitorCount, NumberWords.Length);
 
             _wakeWords = wakeWord.ToLowerInvariant().Split(' ', StringSplitOptions.RemoveEmptyEntries);
@@ -227,6 +235,11 @@ public sealed class VoiceCommandService : IDisposable
         var buffer = new byte[ChunkBytes];
         using var normal = new VoskRecognizer(_model, TargetSampleRate, normalGrammar);
         using var grid = new VoskRecognizer(_model, TargetSampleRate, gridGrammar);
+        normal.SetWords(true);
+        grid.SetWords(true);
+        var silence = new byte[ChunkBytes];
+        var noiseFloor = MinSpeechRms / SpeechOverNoise;
+        var speechUntil = DateTime.MinValue;
         var wasGrid = false;
         var lastPartial = string.Empty;
         var partialChangedAt = DateTime.UtcNow;
@@ -245,8 +258,25 @@ public sealed class VoiceCommandService : IDisposable
                 if (read > 0)
                 {
                     var active = wasGrid ? grid : normal;
-                    for (var b = 0; b + 1 < read; b += 2) _peak = Math.Max(_peak, Math.Abs((int)BitConverter.ToInt16(buffer, b)));
-                    if (active.AcceptWaveform(buffer, read))
+                    double energy = 0;
+                    for (var b = 0; b + 1 < read; b += 2)
+                    {
+                        var sample = BitConverter.ToInt16(buffer, b);
+                        _peak = Math.Max(_peak, Math.Abs((int)sample));
+                        energy += (double)sample * sample;
+                    }
+
+                    // Noise gate: track the background level (falls fast, rises slowly) and only pass audio that
+                    // stands clearly above it. Gated chunks become digital silence, so steady fan/room/headset
+                    // noise can't be mistaken for words and the recognizer can end utterances on its own.
+                    var rms = Math.Sqrt(energy / (read / 2));
+                    noiseFloor = rms < noiseFloor ? rms : noiseFloor + ((rms - noiseFloor) * 0.02);
+                    var loud = rms > Math.Max(MinSpeechRms, noiseFloor * SpeechOverNoise);
+                    if (loud) speechUntil = DateTime.UtcNow + TimeSpan.FromMilliseconds(400);
+                    var gated = DateTime.UtcNow > speechUntil;
+                    if (gated && lastPartial.Length == 0) _peak = 0;
+                    var chunk = gated ? silence : buffer;
+                    if (active.AcceptWaveform(chunk, read))
                     {
                         HandleResult(active.Result(), wasGrid);
                         _peak = 0;
@@ -287,6 +317,22 @@ public sealed class VoiceCommandService : IDisposable
         {
             var text = JsonDocument.Parse(json).RootElement.GetProperty("text").GetString() ?? string.Empty;
             var words = text.Split(' ', StringSplitOptions.RemoveEmptyEntries).Where(w => w != Unknown).ToArray();
+            var low = new List<string>();
+            if (JsonDocument.Parse(json).RootElement.TryGetProperty("result", out var detail))
+            {
+                var confident = new List<string>();
+                foreach (var item in detail.EnumerateArray())
+                {
+                    var word = item.GetProperty("word").GetString() ?? string.Empty;
+                    if (word == Unknown) continue;
+                    if (item.GetProperty("conf").GetDouble() >= MinWordConfidence) confident.Add(word);
+                    else low.Add(word);
+                }
+
+                words = [.. confident];
+                text = string.Join(' ', confident);
+                if (low.Count > 0) _ = _logger.InfoAsync($"[voice] dropped low-confidence words: {string.Join(' ', low)}.");
+            }
             if (words.Length == 0)
             {
                 // Speech was heard but matched nothing in the grammar; the peak (0-32767) shows whether the mic is just too quiet.

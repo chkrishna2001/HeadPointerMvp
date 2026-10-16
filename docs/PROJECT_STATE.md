@@ -1,6 +1,6 @@
 # HeadPointerMvp — project state
 
-Last updated 2026-10-16 by "voice tuning: wake window, forced utterance end, mic level"
+Last updated 2026-10-16 by "voice noise robustness: lgraph model, noise gate, confidence filter"
 
 ## Purpose & shape
 Windows tray app (WinForms, .NET 8) for multi-monitor, low-mouse use. Voice (Vosk offline, closed grammar, NAudio capture) and hotkeys pick a monitor; webcam head yaw (CameraBridge process, OpenCvSharp+YuNet → UDP 127.0.0.1:11573) can too but is OFF by default (user: camera isn't best); a numbered zoom grid points/clicks anywhere.
@@ -22,6 +22,8 @@ Build: `dotnet build HeadPointerMvp.sln`. Settings: `%LocalAppData%\HeadPointerM
 - Wake-word voice: everything is spoken as `<wake word> <command>` (default "rama", `VoiceWakeWord`, may be two words, must be in the Vosk vocab - checked at start via FindWord). Commands: show grid, monitor N, `press [control|alt|shift|control shift] <enter|tab|escape|space|back space|delete|arrows|home|end|page up/down>`, click, right click, double click, scroll up/down, plus `VoiceMacros` (phrase -> chord, in settings.json). Several commands chain after one wake word. Speech without the wake word is ignored, so dictation is untouched; grid mode is the only part that needs no wake word (digits, click, back, cancel). Keys are injected with SendInput (flagged injected; our hooks pass those through).
 
 - Voice tuning (all from real logs): wake word opens a 5 s window and half-heard commands carry over (the engine splits at every pause); utterances are force-closed when partial text is stable 0.7 s (noisy mic never reached silence); grid mode also accepts wake-prefixed commands; 'tap'/'enter' also click in grid mode; log lines show peak and live input level. Verified by user: 'rama show grid', digits, 'click' -> real click, at 65% mic level.
+
+- Noise robustness: prefers `vosk-model-en-us-0.22-lgraph` (~128 MB, in models folder, falls back to small); noise gate (adaptive floor, gated audio becomes silence); per-word confidence filter (0.4, dropped words logged). Built OK but NOT yet verified by real mic (app was running, exe locked: close it, rebuild, test).
 
 ## In progress
 Nothing. NOT yet verified on screen: grid rendering, digit/Enter/voice flow, hysteresis/typing-freeze feel. Build is clean (0 warnings).
