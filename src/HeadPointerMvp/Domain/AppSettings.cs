@@ -38,6 +38,8 @@ public sealed class AppSettings
     public int TiltHoldMilliseconds { get; set; } = 1200;
     /// <summary>Voice commands only act when preceded by this word ("rama show grid"), so dictation and conversation are never touched. May be two words ("sri ram"). Must exist in the speech model's vocabulary.</summary>
     public string VoiceWakeWord { get; set; } = "rama";
+    /// <summary>Saved screen points for "rama save spot one" / "rama spot one" (spot number -> [x, y]).</summary>
+    public Dictionary<int, int[]> VoiceSpots { get; set; } = new();
     /// <summary>Spoken phrase -> key combination, e.g. "next tab": "Ctrl+Tab". Said as "rama next tab". Edit in settings.json.</summary>
     public Dictionary<string, string> VoiceMacros { get; set; } = new()
     {

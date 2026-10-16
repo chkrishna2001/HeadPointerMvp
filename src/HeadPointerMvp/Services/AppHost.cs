@@ -264,6 +264,26 @@ public sealed class AppHost : IAsyncDisposable
                 _ = _logger.InfoAsync($"[voice] pressing {intent.Chord}.");
                 _pointer.SendChord(intent.Chord);
                 break;
+            case VoiceIntentKind.SaveSpot:
+                var here = Cursor.Position;
+                _settings.VoiceSpots[intent.Index] = [here.X, here.Y];
+                _ = _settingsStore.SaveAsync(_settings);
+                _ = _logger.InfoAsync($"[voice] saved spot {intent.Index} at {here.X},{here.Y}.");
+                break;
+            case VoiceIntentKind.GoSpot:
+                if (_settings.VoiceSpots.TryGetValue(intent.Index, out var spot) && spot.Length == 2)
+                {
+                    _grid?.Close();
+                    _pointer.ClickAt(spot[0], spot[1], PointerService.ClickKind.Left);
+                    _ = _logger.InfoAsync($"[voice] clicked spot {intent.Index} at {spot[0]},{spot[1]}.");
+                }
+                else
+                {
+                    _ = _logger.InfoAsync($"[voice] spot {intent.Index} is not saved yet.");
+                    VoiceFeedback("miss", string.Empty);
+                }
+
+                break;
             case VoiceIntentKind.Click:
                 _pointer.ClickHere(PointerService.ClickKind.Left);
                 break;
