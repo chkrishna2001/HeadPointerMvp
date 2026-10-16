@@ -24,9 +24,7 @@ public enum VoiceIntentKind
     RightClick,
     DoubleClick,
     ScrollUp,
-    ScrollDown,
-    SaveSpot,
-    GoSpot
+    ScrollDown
 }
 
 public readonly record struct VoiceIntent(VoiceIntentKind Kind, int Index = 0, string Chord = "");
@@ -188,13 +186,6 @@ public sealed class VoiceCommandService : IDisposable
                 Add($"press {spokenModifier}{spokenKey}", intent);
                 Add($"{spokenModifier}{spokenKey}", intent); // "rama alt tab" works too: 'press' is often swallowed by the recognizer
             }
-        }
-
-        for (var i = 0; i < Math.Min(NumberWords.Length, 9); i++)
-        {
-            // A saved screen point (e.g. a mic button) reached in one short command instead of re-walking the grid.
-            Add($"save spot {NumberWords[i]}", new VoiceIntent(VoiceIntentKind.SaveSpot, i + 1));
-            Add($"spot {NumberWords[i]}", new VoiceIntent(VoiceIntentKind.GoSpot, i + 1));
         }
 
         Add("click", new VoiceIntent(VoiceIntentKind.Click));
