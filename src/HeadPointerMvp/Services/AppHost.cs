@@ -227,7 +227,7 @@ public sealed class AppHost : IAsyncDisposable
                     new NAudio.Wave.SampleProviders.SignalGenerator(44100, 1) { Type = NAudio.Wave.SampleProviders.SignalGeneratorType.Sin, Frequency = hz, Gain = 0.3 })
                 { Take = TimeSpan.FromMilliseconds(ms) };
                 using var output = new NAudio.Wave.WaveOutEvent();
-                output.Init(tone);
+                output.Init(new NAudio.Wave.SampleToWaveProvider(tone));
                 output.Play();
                 while (output.PlaybackState == NAudio.Wave.PlaybackState.Playing) Thread.Sleep(10);
             }
