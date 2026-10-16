@@ -71,6 +71,10 @@ public sealed class VoiceCommandService : IDisposable
     /// <summary>A digit 1..9 spoken while the grid is open.</summary>
     public event Action<int>? GridDigitSpoken;
 
+    /// <summary>Audible/visible acknowledgement: "wake" (heard the wake word), "ok" (ran a command; text = phrase), "miss" (woke but no command followed).</summary>
+    public event Action<string, string>? Feedback;
+    private bool _awaiting;
+
     public event Action<GridCommand>? GridCommandSpoken;
 
     /// <summary>Switches which grammar is listening: digits/click while the grid is open, grid/monitor otherwise.</summary>
@@ -176,7 +180,12 @@ public sealed class VoiceCommandService : IDisposable
 
         foreach (var (spokenModifier, chordModifier) in SpokenModifiers)
         {
-            foreach (var (spokenKey, key) in SpokenKeys) Add($"press {spokenModifier}{spokenKey}", new VoiceIntent(VoiceIntentKind.Press, 0, chordModifier + key));
+            foreach (var (spokenKey, key) in SpokenKeys)
+            {
+                var intent = new VoiceIntent(VoiceIntentKind.Press, 0, chordModifier + key);
+                Add($"press {spokenModifier}{spokenKey}", intent);
+                Add($"{spokenModifier}{spokenKey}", intent); // "rama alt tab" works too: 'press' is often swallowed by the recognizer
+            }
         }
 
         Add("click", new VoiceIntent(VoiceIntentKind.Click));
@@ -252,6 +261,13 @@ public sealed class VoiceCommandService : IDisposable
                 {
                     wasGrid = _gridMode;
                     (wasGrid ? grid : normal).Reset(); // drop any half-heard audio from before the switch
+                }
+
+                if (_awaiting && DateTime.UtcNow > _awakeUntil)
+                {
+                    _awaiting = false;
+                    _pending.Clear();
+                    Feedback?.Invoke("miss", string.Empty);
                 }
 
                 var read = source.Read(buffer, 0, buffer.Length);
@@ -370,6 +386,8 @@ public sealed class VoiceCommandService : IDisposable
             if (MatchesAt(words, i, _wakeWords))
             {
                 awake = true;
+                _awaiting = true;
+                Feedback?.Invoke("wake", string.Empty);
                 _awakeUntil = DateTime.UtcNow + WakeWindow;
                 i += _wakeWords.Length;
                 consumedTo = i;
@@ -387,6 +405,8 @@ public sealed class VoiceCommandService : IDisposable
             {
                 if (!_commands.TryGetValue(string.Join(' ', words.Skip(i).Take(length)), out var intent)) continue;
                 IntentRaised?.Invoke(intent);
+                _awaiting = false;
+                Feedback?.Invoke("ok", string.Join(' ', words.Skip(i).Take(length)));
                 _awakeUntil = DateTime.UtcNow + FollowUpWindow;
                 i += length;
                 matched = true;

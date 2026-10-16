@@ -196,9 +196,41 @@ public sealed class AppHost : IAsyncDisposable
 
         _voice = new VoiceCommandService(_logger);
         _voice.IntentRaised += intent => OnUi(() => HandleVoiceIntent(intent));
+        _voice.Feedback += (kind, text) => VoiceFeedback(kind, text);
         _voice.GridDigitSpoken += digit => OnUi(() => _grid?.Zoom(digit));
         _voice.GridCommandSpoken += command => OnUi(() => _grid?.Execute(command));
         _voice.Start(_monitors.GetMonitors().Count, _settings.MicrophoneDeviceId, _settings.VoiceWakeWord, _settings.VoiceMacros);
+    }
+
+    /// <summary>Tells the user what the voice engine did: rising chirp = "listening", double chirp = command ran, low buzz = no command heard.</summary>
+    private void VoiceFeedback(string kind, string text)
+    {
+        _ = _logger.InfoAsync($"[voice] feedback: {kind} {text}".TrimEnd());
+        _ = Task.Run(() =>
+        {
+            try
+            {
+                switch (kind)
+                {
+                    case "wake":
+                        Console.Beep(900, 90);
+                        break;
+                    case "ok":
+                        Console.Beep(700, 70);
+                        Console.Beep(1100, 90);
+                        break;
+                    case "miss":
+                        Console.Beep(220, 250);
+                        break;
+                }
+            }
+            catch
+            {
+                // No beep device; the balloon below still tells the user.
+            }
+        });
+        if (kind == "ok") OnUi(() => _tray?.ShowBalloon("Voice", text));
+        else if (kind == "miss") OnUi(() => _tray?.ShowBalloon("Voice", "Heard the wake word but no command"));
     }
 
     private void StopVoiceCommands()
