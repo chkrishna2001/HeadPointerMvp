@@ -48,6 +48,7 @@ public sealed class VoiceCommandService : IDisposable
     private readonly List<string> _pending = [];
     private int _peak;
     private static readonly TimeSpan WakeWindow = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan StableUtterance = TimeSpan.FromMilliseconds(700);
     private static readonly TimeSpan FollowUpWindow = TimeSpan.FromSeconds(2);
 
     public VoiceCommandService(FileLogger logger) => _logger = logger;
@@ -209,6 +210,8 @@ public sealed class VoiceCommandService : IDisposable
         using var normal = new VoskRecognizer(_model, TargetSampleRate, normalGrammar);
         using var grid = new VoskRecognizer(_model, TargetSampleRate, gridGrammar);
         var wasGrid = false;
+        var lastPartial = string.Empty;
+        var partialChangedAt = DateTime.UtcNow;
 
         try
         {
@@ -229,6 +232,25 @@ public sealed class VoiceCommandService : IDisposable
                     {
                         HandleResult(active.Result(), wasGrid);
                         _peak = 0;
+                        lastPartial = string.Empty;
+                    }
+                    else
+                    {
+                        // The recognizer only closes an utterance after a stretch of true silence; with a noisy
+                        // headset or room that can take far too long (or never come). If the in-progress text has
+                        // stopped changing, close the utterance ourselves.
+                        var partial = JsonDocument.Parse(active.PartialResult()).RootElement.GetProperty("partial").GetString() ?? string.Empty;
+                        if (partial != lastPartial)
+                        {
+                            lastPartial = partial;
+                            partialChangedAt = DateTime.UtcNow;
+                        }
+                        else if (partial.Length > 0 && DateTime.UtcNow - partialChangedAt > StableUtterance)
+                        {
+                            HandleResult(active.FinalResult(), wasGrid);
+                            _peak = 0;
+                            lastPartial = string.Empty;
+                        }
                     }
                 }
 
