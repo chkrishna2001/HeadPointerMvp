@@ -44,6 +44,10 @@ public sealed class VoiceCommandService : IDisposable
     private string[] _wakeWords = [];
     private readonly Dictionary<string, VoiceIntent> _commands = new(StringComparer.Ordinal);
     private int _longestCommand = 1;
+    private DateTime _awakeUntil = DateTime.MinValue;
+    private readonly List<string> _pending = [];
+    private static readonly TimeSpan WakeWindow = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan FollowUpWindow = TimeSpan.FromSeconds(2);
 
     public VoiceCommandService(FileLogger logger) => _logger = logger;
 
@@ -257,13 +261,21 @@ public sealed class VoiceCommandService : IDisposable
     private void DispatchNormal(string[] words)
     {
         var i = 0;
-        var awake = false;
+        // The recognizer ends a result at every short pause, so "rama ... press ... tab" often arrives as
+        // separate results. Hearing the wake word (or running a command) therefore leaves a brief window in
+        // which the next result still counts, and a half-heard command ("press") is carried into it.
+        var awake = DateTime.UtcNow < _awakeUntil;
+        if (awake && _pending.Count > 0) words = [.. _pending, .. words];
+        _pending.Clear();
+        var consumedTo = 0;
         while (i < words.Length)
         {
             if (MatchesAt(words, i, _wakeWords))
             {
                 awake = true;
+                _awakeUntil = DateTime.UtcNow + WakeWindow;
                 i += _wakeWords.Length;
+                consumedTo = i;
                 continue;
             }
 
@@ -278,12 +290,19 @@ public sealed class VoiceCommandService : IDisposable
             {
                 if (!_commands.TryGetValue(string.Join(' ', words.Skip(i).Take(length)), out var intent)) continue;
                 IntentRaised?.Invoke(intent);
+                _awakeUntil = DateTime.UtcNow + FollowUpWindow;
                 i += length;
                 matched = true;
             }
 
-            if (!matched) i++;
+            if (matched) consumedTo = i;
+            else i++;
         }
+
+        if (!awake) return;
+        // Words after the last wake word / command are probably the start of one ("press"): keep them for the next result.
+        _pending.AddRange(words.Skip(consumedTo).Where(w => !MatchesAt([w], 0, _wakeWords)).TakeLast(3));
+        if (_pending.Count > 0) _awakeUntil = DateTime.UtcNow + WakeWindow;
     }
 
     private static bool MatchesAt(string[] words, int index, string[] phrase)
