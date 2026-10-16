@@ -30,6 +30,12 @@ public sealed class AppSettings
     public string GridHotkey { get; set; } = "Ctrl+Alt+G";
     /// <summary>Ctrl+Alt+1..9 jump straight to that monitor (1-indexed). Turn off if the combos clash with other software.</summary>
     public bool MonitorHotkeysEnabled { get; set; } = true;
+    /// <summary>Mouse side button that opens/closes the grid and is swallowed system-wide: "XButton1" (back), "XButton2" (forward) or "None".</summary>
+    public string GridMouseButton { get; set; } = "XButton2";
+    /// <summary>Tilt your head sideways and hold to open/close the grid. Works with a remote desktop focused.</summary>
+    public bool HeadTiltOpensGrid { get; set; } = true;
+    public float TiltDegrees { get; set; } = 15;
+    public int TiltHoldMilliseconds { get; set; } = 1200;
     public string ToggleHotkey { get; set; } = "Ctrl+Alt+H";
     public string PauseHotkey { get; set; } = "Ctrl+Alt+P";
 }

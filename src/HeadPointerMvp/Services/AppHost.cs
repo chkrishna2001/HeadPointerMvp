@@ -23,6 +23,8 @@ public sealed class AppHost : IAsyncDisposable
     private Process? _bridgeProcess;
     private VoiceCommandService? _voice;
     private GridPointerService? _grid;
+    private TriggerHookService? _triggers;
+    private HeadTiltGesture? _tilt;
     private readonly SynchronizationContext? _ui = SynchronizationContext.Current;
     private float? _latestYaw;
     private bool _disposed;
@@ -75,7 +77,11 @@ public sealed class AppHost : IAsyncDisposable
         try
         {
             _poseSource = new OpenSeeFaceHeadPoseSource(_settings.OpenSeeFaceHost, _settings.OpenSeeFacePort, _logger);
-            _poseSource.PoseReceived += (_, pose) => router.Process(pose);
+            _poseSource.PoseReceived += (_, pose) =>
+            {
+                router.Process(pose);
+                _tilt?.Process(pose);
+            };
             await _poseSource.StartAsync(_stop.Token);
             _tray?.ShowBalloon("HeadPointer", "Tray app is running. Waiting for head tracking data.");
         }
@@ -102,6 +108,29 @@ public sealed class AppHost : IAsyncDisposable
                 TryRegister($"Ctrl+Alt+D{i + 1}", () => MoveToMonitorExplicit(index, "hotkey"));
             }
         }
+
+        // Low-level hooks as well: these still fire when a full-screen remote desktop has focus and
+        // would otherwise swallow the chords. They run first and swallow the keys; RegisterHotKey above stays as a fallback.
+        _triggers = new TriggerHookService(_logger, OnUi);
+        _triggers.AddChord(_settings.GridHotkey, () => _grid?.Toggle());
+        if (_settings.MonitorHotkeysEnabled)
+        {
+            var count = Math.Min(_monitors.GetMonitors().Count, 9);
+            for (var i = 0; i < count; i++)
+            {
+                var index = i;
+                _triggers.AddChord($"Ctrl+Alt+D{i + 1}", () => MoveToMonitorExplicit(index, "hotkey"));
+            }
+        }
+
+        _triggers.SetMouseButton(_settings.GridMouseButton, () => _grid?.Toggle());
+        _triggers.Install();
+
+        _tilt = new HeadTiltGesture(() => _settings, () => OnUi(() =>
+        {
+            _ = _logger.InfoAsync("[trigger] head tilt held -> grid.");
+            _grid?.Toggle();
+        }));
 
         await Task.CompletedTask;
     }
@@ -315,6 +344,7 @@ public sealed class AppHost : IAsyncDisposable
         StopCameraTracking();
         StopVoiceCommands();
         _grid?.Dispose();
+        _triggers?.Dispose();
         _bridgeJob.Dispose();
         _tray?.Dispose();
         _hotkeys?.Dispose();

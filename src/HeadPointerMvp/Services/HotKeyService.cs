@@ -39,7 +39,7 @@ public sealed partial class HotKeyService : NativeWindow, IDisposable
         DestroyHandle();
     }
 
-    private static (uint modifiers, uint key) Parse(string shortcut)
+    internal static (uint modifiers, uint key) Parse(string shortcut)
     {
         var parts = shortcut.Split('+', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
         if (parts.Length < 2 || !Enum.TryParse<Keys>(parts[^1], true, out var key))
