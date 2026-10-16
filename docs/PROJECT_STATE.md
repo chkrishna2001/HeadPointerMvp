@@ -1,6 +1,6 @@
 # HeadPointerMvp — project state
 
-Last updated 2026-10-16 by "voice noise robustness: lgraph model, noise gate, confidence filter"
+Last updated 2026-10-16 by "voice noise robustness, feedback beeps, key shorthand"
 
 ## Purpose & shape
 Windows tray app (WinForms, .NET 8) for multi-monitor, low-mouse use. Voice (Vosk offline, closed grammar, NAudio capture) and hotkeys pick a monitor; webcam head yaw (CameraBridge process, OpenCvSharp+YuNet → UDP 127.0.0.1:11573) can too but is OFF by default (user: camera isn't best); a numbered zoom grid points/clicks anywhere.
@@ -27,25 +27,21 @@ Build: `dotnet build HeadPointerMvp.sln`. Settings: `%LocalAppData%\HeadPointerM
 - Voice feedback: wake word -> rising beep, command ran -> double chirp (NAudio tones on the default output; Console.Beep was inaudible; tray balloons rejected as annoying), wake without command in 5 s -> low buzz (`VoiceCommandService.Feedback` -> `AppHost.VoiceFeedback`). Keys also work without "press" ("rama alt tab"), since the recognizer often drops "press". Not yet verified by ear.
 
 ## In progress
-Nothing. NOT yet verified on screen: grid rendering, digit/Enter/voice flow, hysteresis/typing-freeze feel. Build is clean (0 warnings).
+Nothing. Camera is not used (CameraTrackingEnabled=false, no CameraBridge process); the user keeps the shutter closed and works by voice.
 
 ## Remaining
-- Step 2: UIA 'show numbers' mode (local apps, e.g. Claude desktop sidebar); 4x4 first grid level.
-- Step 3: voice macros (phrase -> key chord, JSON-configured) for session switching; find Claude desktop's own session shortcuts.
-- Verify the grid and freeze behaviour by hand, then tune `TypingFreezeMilliseconds`, `PitchFreezeUnits`.
-- Recalibrate monitors in Settings (yaw formula changed slightly).
-- Settings UI for the new settings (currently JSON-only).
-- "Show numbers" mode: UI Automation clickable elements labelled with numbers (the other half of Apple Voice Control).
-- Mic input level must stay ~60-65% (100% clipped and wrecked accuracy); the app never changes system settings. Wrong-word noise in grid mode ('tab', 'page') is harmless but shows the merged grammar is loose.
-- Settings UI for wake word/macros (JSON-only now). Claude desktop's own session-switch shortcuts still unknown: add as VoiceMacros once found.
-- Tune Vosk by real use (`[voice] heard` lines); consider a different wake word if 'rama' mis-fires.
-- Model auto-download/installer step; README still describes SAPI.
+- Decide with the user (discuss BEFORE building; they dislike unrequested designs): how to keep spoken commands out of an external dictation tool. Options: per-app commands keyed by foreground process ("start/stop dictating" -> shortcut or UIA button click; probe UIA names in Claude desktop/Slack first), a silent hotkey, or built-in Vosk dictation mode (PARKED by user).
+- Possibly remove the camera/head-tracking code (user undecided; ask).
+- Tune noise gate and confidence filter by real use (`MinSpeechRms`, `SpeechOverNoise`, `MinWordConfidence` in VoiceCommandService.cs; log shows `dropped low-confidence words`).
+- Grid-mode grammar is loose (includes wake-prefixed phrases); tighten if stray words fire.
+- Step 2: UIA 'show numbers' mode; 4x4 first grid level; Settings UI for wake word/macros/mic; model auto-download; README still describes SAPI.
+- Mic input level must stay ~60-65% (100% clipped and wrecked accuracy); the app never changes system settings.
 
 ## Last session
-User confirmed mouse button, Ctrl+Alt+G, grid work with the cloud PC focused; voice (SAPI) was flaky. Swapped to Vosk, then added the wake word; builds clean, app starts and listens on the Logi headset mic. Offline TTS test showed wake-word phrases parse and non-wake speech is ignored. Never inject keys from the agent: the user works in a live remote session.
+Downloaded vosk-model-en-us-0.22-lgraph (128 MB, in the models folder; code prefers it, falls back to small). Added noise gate, per-word confidence filter, audible feedback (rising beep = wake word heard, double chirp = command ran, low buzz = no command in 5 s; NAudio tones, tray balloons rejected as annoying), and key commands without "press" ("rama alt tab" works). Saved-spots idea was built, rejected by the user and reverted. Verified by user: beeps audible, commands run. Build clean.
 
 ## Next task
-Real-use test with Windows App focused: 'rama press tab', 'rama scroll down', 'rama monitor two', 'rama next tab'; then Step 2 (show numbers) and Step 3 (find Claude desktop session shortcuts -> VoiceMacros). Done when each works within 2 tries; done when log shows `[voice] heard` and `[grid] Left click` and the click lands within a few px. Then Step 2/3 (show numbers, voice macros).
+Discuss the dictation/command-leak options above with the user and agree one before coding. Done when the user picks a design and a first command works in Claude desktop within 2 tries.
 
 ## Decisions & gotchas
 - Swallowed Ctrl+Alt+G still lets the remote see Ctrl+Alt down/up (only the G is eaten); harmless so far.
