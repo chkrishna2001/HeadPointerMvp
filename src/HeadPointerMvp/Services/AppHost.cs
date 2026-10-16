@@ -217,6 +217,9 @@ public sealed class AppHost : IAsyncDisposable
             case VoiceIntentKind.Grid:
                 _grid?.Begin();
                 break;
+            case VoiceIntentKind.GridClose:
+                _grid?.Close();
+                break;
             case VoiceIntentKind.Monitor:
                 MoveToMonitorExplicit(intent.Index, "voice");
                 break;

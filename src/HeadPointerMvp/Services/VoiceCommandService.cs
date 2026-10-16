@@ -17,6 +17,7 @@ namespace HeadPointerMvp.Services;
 public enum VoiceIntentKind
 {
     Grid,
+    GridClose,
     Monitor,
     Press,
     Click,
@@ -116,7 +117,9 @@ public sealed class VoiceCommandService : IDisposable
 
             BuildCommands(count, macros);
             var normalGrammar = BuildGrammar(_commands.Keys.Select(phrase => $"{string.Join(' ', _wakeWords)} {phrase}"));
-            var gridGrammar = BuildGrammar([.. NumberWords.Take(9), "click", "select", "right click", "double click", "back", "undo", "cancel", "close grid", "next monitor"]);
+            var wakePhrase = string.Join(' ', _wakeWords);
+            var gridGrammar = BuildGrammar([.. NumberWords.Take(9), "click", "select", "right click", "double click", "back", "undo", "cancel", "close grid", "next monitor",
+                .. _commands.Keys.Select(phrase => $"{wakePhrase} {phrase}")]);
 
             var pcm = StartCapture(microphoneDeviceId);
             _pumpCts = new CancellationTokenSource();
@@ -155,6 +158,7 @@ public sealed class VoiceCommandService : IDisposable
         }
 
         foreach (var phrase in new[] { "grid", "show grid", "mouse grid", "pointer grid" }) Add(phrase, new VoiceIntent(VoiceIntentKind.Grid));
+        foreach (var phrase in new[] { "close grid", "hide grid", "cancel grid" }) Add(phrase, new VoiceIntent(VoiceIntentKind.GridClose));
         for (var i = 0; i < monitorCount; i++)
         {
             Add($"monitor {NumberWords[i]}", new VoiceIntent(VoiceIntentKind.Monitor, i));
@@ -349,8 +353,22 @@ public sealed class VoiceCommandService : IDisposable
         return true;
     }
 
-    /// <summary>One utterance can hold several commands ("five five five click"); they are applied in order.</summary>
+    /// <summary>In grid mode, anything from the wake word onward is an ordinary command ("rama monitor two"); the part before it is grid words.</summary>
     private void DispatchGrid(string[] words)
+    {
+        for (var i = 0; i < words.Length; i++)
+        {
+            if (!MatchesAt(words, i, _wakeWords)) continue;
+            DispatchGridWords(words[..i]);
+            DispatchNormal(words[i..]);
+            return;
+        }
+
+        DispatchGridWords(words);
+    }
+
+    /// <summary>One utterance can hold several commands ("five five five click"); they are applied in order.</summary>
+    private void DispatchGridWords(string[] words)
     {
         for (var i = 0; i < words.Length; i++)
         {
