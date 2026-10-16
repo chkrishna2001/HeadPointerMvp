@@ -48,6 +48,7 @@ public sealed class VoiceCommandService : IDisposable
     private DateTime _awakeUntil = DateTime.MinValue;
     private readonly List<string> _pending = [];
     private int _peak;
+    private AudioEndpointVolume? _endpointVolume;
     private static readonly TimeSpan WakeWindow = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan StableUtterance = TimeSpan.FromMilliseconds(700);
     private static readonly TimeSpan FollowUpWindow = TimeSpan.FromSeconds(2);
@@ -203,18 +204,21 @@ public sealed class VoiceCommandService : IDisposable
         if (samples.WaveFormat.Channels != 1) samples = new DownmixToMonoSampleProvider(samples);
         var resampled = new WdlResamplingSampleProvider(samples, TargetSampleRate);
         _capture.StartRecording();
-        string level;
+        _endpointVolume = device.AudioEndpointVolume;
+        _ = _logger.InfoAsync($"Voice capture started on \"{device.FriendlyName}\" ({_capture.WaveFormat}), input level {InputLevel()}.");
+        return new SampleToWaveProvider16(resampled);
+    }
+
+    private string InputLevel()
+    {
         try
         {
-            level = $"{device.AudioEndpointVolume.MasterVolumeLevelScalar * 100:0}%";
+            return _endpointVolume is null ? "unknown" : $"{_endpointVolume.MasterVolumeLevelScalar * 100:0}%";
         }
         catch
         {
-            level = "unknown";
+            return "unknown";
         }
-
-        _ = _logger.InfoAsync($"Voice capture started on \"{device.FriendlyName}\" ({_capture.WaveFormat}), input level {level}.");
-        return new SampleToWaveProvider16(resampled);
     }
 
     private void RecognitionLoop(IWaveProvider source, string normalGrammar, string gridGrammar, CancellationToken token)
@@ -290,7 +294,7 @@ public sealed class VoiceCommandService : IDisposable
                 return;
             }
 
-            _ = _logger.InfoAsync($"[voice] heard \"{text}\" ({(gridMode ? "grid" : "normal")} mode, peak {_peak}).");
+            _ = _logger.InfoAsync($"[voice] heard \"{text}\" ({(gridMode ? "grid" : "normal")} mode, peak {_peak}, input level {InputLevel()}).");
             if (gridMode) DispatchGrid(words);
             else DispatchNormal(words);
         }
