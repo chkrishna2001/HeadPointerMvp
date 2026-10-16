@@ -46,6 +46,7 @@ public sealed class VoiceCommandService : IDisposable
     private int _longestCommand = 1;
     private DateTime _awakeUntil = DateTime.MinValue;
     private readonly List<string> _pending = [];
+    private int _peak;
     private static readonly TimeSpan WakeWindow = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan FollowUpWindow = TimeSpan.FromSeconds(2);
 
@@ -223,7 +224,12 @@ public sealed class VoiceCommandService : IDisposable
                 if (read > 0)
                 {
                     var active = wasGrid ? grid : normal;
-                    if (active.AcceptWaveform(buffer, read)) HandleResult(active.Result(), wasGrid);
+                    for (var b = 0; b + 1 < read; b += 2) _peak = Math.Max(_peak, Math.Abs((int)BitConverter.ToInt16(buffer, b)));
+                    if (active.AcceptWaveform(buffer, read))
+                    {
+                        HandleResult(active.Result(), wasGrid);
+                        _peak = 0;
+                    }
                 }
 
                 Thread.Sleep(50);
@@ -241,9 +247,14 @@ public sealed class VoiceCommandService : IDisposable
         {
             var text = JsonDocument.Parse(json).RootElement.GetProperty("text").GetString() ?? string.Empty;
             var words = text.Split(' ', StringSplitOptions.RemoveEmptyEntries).Where(w => w != Unknown).ToArray();
-            if (words.Length == 0) return;
+            if (words.Length == 0)
+            {
+                // Speech was heard but matched nothing in the grammar; the peak (0-32767) shows whether the mic is just too quiet.
+                if (text.Length > 0) _ = _logger.InfoAsync($"[voice] heard speech but nothing usable (peak {_peak}).");
+                return;
+            }
 
-            _ = _logger.InfoAsync($"[voice] heard \"{text}\" ({(gridMode ? "grid" : "normal")} mode).");
+            _ = _logger.InfoAsync($"[voice] heard \"{text}\" ({(gridMode ? "grid" : "normal")} mode, peak {_peak}).");
             if (gridMode) DispatchGrid(words);
             else DispatchNormal(words);
         }
