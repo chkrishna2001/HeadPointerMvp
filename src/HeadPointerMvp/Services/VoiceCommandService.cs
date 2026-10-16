@@ -118,7 +118,7 @@ public sealed class VoiceCommandService : IDisposable
             BuildCommands(count, macros);
             var normalGrammar = BuildGrammar(_commands.Keys.Select(phrase => $"{string.Join(' ', _wakeWords)} {phrase}"));
             var wakePhrase = string.Join(' ', _wakeWords);
-            var gridGrammar = BuildGrammar([.. NumberWords.Take(9), "click", "select", "right click", "double click", "back", "undo", "cancel", "close grid", "next monitor",
+            var gridGrammar = BuildGrammar([.. NumberWords.Take(9), "click", "tap", "enter", "select", "right click", "double click", "back", "undo", "cancel", "close grid", "next monitor",
                 .. _commands.Keys.Select(phrase => $"{wakePhrase} {phrase}")]);
 
             var pcm = StartCapture(microphoneDeviceId);
@@ -203,7 +203,17 @@ public sealed class VoiceCommandService : IDisposable
         if (samples.WaveFormat.Channels != 1) samples = new DownmixToMonoSampleProvider(samples);
         var resampled = new WdlResamplingSampleProvider(samples, TargetSampleRate);
         _capture.StartRecording();
-        _ = _logger.InfoAsync($"Voice capture started on \"{device.FriendlyName}\" ({_capture.WaveFormat}).");
+        string level;
+        try
+        {
+            level = $"{device.AudioEndpointVolume.MasterVolumeLevelScalar * 100:0}%";
+        }
+        catch
+        {
+            level = "unknown";
+        }
+
+        _ = _logger.InfoAsync($"Voice capture started on \"{device.FriendlyName}\" ({_capture.WaveFormat}), input level {level}.");
         return new SampleToWaveProvider16(resampled);
     }
 
@@ -382,7 +392,7 @@ public sealed class VoiceCommandService : IDisposable
 
             switch (words[i])
             {
-                case "click" or "select":
+                case "click" or "tap" or "enter" or "select":
                     GridCommandSpoken?.Invoke(GridCommand.Click);
                     break;
                 case "right" when next == "click":
