@@ -198,44 +198,16 @@ public sealed class AppHost : IAsyncDisposable
         _voice.IntentRaised += intent => OnUi(() => HandleVoiceIntent(intent));
         _voice.Feedback += (kind, text) => VoiceFeedback(kind, text);
         _voice.GridDigitSpoken += digit => OnUi(() => _grid?.Zoom(digit));
+        _voice.GridWordSpoken += cell => OnUi(() => _grid?.ZoomWord(cell));
         _voice.GridCommandSpoken += command => OnUi(() => _grid?.Execute(command));
         _voice.Start(_monitors.GetMonitors().Count, _settings.MicrophoneDeviceId, _settings.VoiceWakeWord, _settings.VoiceMacros);
     }
 
-    /// <summary>Tells the user what the voice engine did: rising chirp = "listening", double chirp = command ran, low buzz = no command heard.</summary>
+    /// <summary>Tells the user what the voice engine did: rising whoop = "listening", dry tick = command ran, falling error sound = no command heard.</summary>
     private void VoiceFeedback(string kind, string text)
     {
         _ = _logger.InfoAsync($"[voice] feedback: {kind} {text}".TrimEnd());
-        var tones = kind switch
-        {
-            "wake" => new[] { (900, 90) },
-            "ok" => new[] { (700, 70), (1100, 90) },
-            "miss" => new[] { (220, 250) },
-            _ => Array.Empty<(int, int)>()
-        };
-        _ = Task.Run(() => PlayTones(tones));
-    }
-
-    /// <summary>Plays beeps through the default output device (Console.Beep is silent for a tray app on many setups).</summary>
-    private void PlayTones((int Hz, int Ms)[] tones)
-    {
-        try
-        {
-            foreach (var (hz, ms) in tones)
-            {
-                var tone = new NAudio.Wave.SampleProviders.OffsetSampleProvider(
-                    new NAudio.Wave.SampleProviders.SignalGenerator(44100, 1) { Type = NAudio.Wave.SampleProviders.SignalGeneratorType.Sin, Frequency = hz, Gain = 0.3 })
-                { Take = TimeSpan.FromMilliseconds(ms) };
-                using var output = new NAudio.Wave.WaveOutEvent();
-                output.Init(new NAudio.Wave.SampleProviders.SampleToWaveProvider(tone));
-                output.Play();
-                while (output.PlaybackState == NAudio.Wave.PlaybackState.Playing) Thread.Sleep(10);
-            }
-        }
-        catch (Exception ex)
-        {
-            _ = _logger.InfoAsync($"[voice] feedback sound failed: {ex.Message}");
-        }
+        _ = Task.Run(() => FeedbackSounds.Play(kind, _logger));
     }
 
     private void StopVoiceCommands()

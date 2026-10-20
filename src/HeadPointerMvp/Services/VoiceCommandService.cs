@@ -34,9 +34,9 @@ public sealed class VoiceCommandService : IDisposable
     private const int TargetSampleRate = 16000;
     // Best first: the dynamic-graph model is far more accurate than the small one and supports our runtime grammar.
     private static readonly string[] ModelFolderNames = ["vosk-model-en-us-0.22-lgraph", "vosk-model-small-en-us-0.15"];
-    private const double MinSpeechRms = 450;       // absolute floor (16-bit units) below which nothing counts as speech
+    private const double MinSpeechRms = 300;       // absolute floor (16-bit units) below which nothing counts as speech
     private const double SpeechOverNoise = 2.5;    // chunk must be this many times louder than the tracked noise floor
-    private const double MinWordConfidence = 0.4;
+    private const double MinWordConfidence = 0.3;
     private const string Unknown = "[unk]";
     private static readonly string[] NumberWords = ["one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten"];
 
@@ -55,7 +55,7 @@ public sealed class VoiceCommandService : IDisposable
     private AudioEndpointVolume? _endpointVolume;
     private static readonly TimeSpan WakeWindow = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan StableUtterance = TimeSpan.FromMilliseconds(700);
-    private static readonly TimeSpan FollowUpWindow = TimeSpan.FromSeconds(2);
+    private static readonly TimeSpan FollowUpWindow = TimeSpan.FromSeconds(3);
 
     public VoiceCommandService(FileLogger logger) => _logger = logger;
 
@@ -76,6 +76,9 @@ public sealed class VoiceCommandService : IDisposable
     private bool _awaiting;
 
     public event Action<GridCommand>? GridCommandSpoken;
+
+    /// <summary>A NATO word naming a first-level grid cell (alpha = 1 .. papa = 16).</summary>
+    public event Action<int>? GridWordSpoken;
 
     /// <summary>Switches which grammar is listening: digits/click while the grid is open, grid/monitor otherwise.</summary>
     public void SetGridMode(bool active) => _gridMode = active;
@@ -129,9 +132,11 @@ public sealed class VoiceCommandService : IDisposable
             }
 
             BuildCommands(count, macros);
-            var normalGrammar = BuildGrammar(_commands.Keys.Select(phrase => $"{string.Join(' ', _wakeWords)} {phrase}"));
             var wakePhrase = string.Join(' ', _wakeWords);
-            var gridGrammar = BuildGrammar([.. NumberWords.Take(9), "click", "tap", "enter", "select", "right click", "double click", "back", "undo", "cancel", "close grid", "next monitor",
+            // Whole phrases only decode when spoken in one go, so the grammar also accepts the wake word alone and every
+            // command without it: "rama ... (pause) ... click" works. Bare commands are ignored unless the wake word was heard recently.
+            var normalGrammar = BuildGrammar([wakePhrase, .. _commands.Keys.Select(phrase => $"{wakePhrase} {phrase}"), .. _commands.Keys]);
+            var gridGrammar = BuildGrammar([.. NumberWords.Take(9), .. GridPointerService.CellWords, "click", "tap", "enter", "select", "right click", "double click", "back", "undo", "cancel", "close grid", "next monitor",
                 .. _commands.Keys.Select(phrase => $"{wakePhrase} {phrase}")]);
 
             var pcm = StartCapture(microphoneDeviceId);
@@ -152,6 +157,28 @@ public sealed class VoiceCommandService : IDisposable
         ("enter", "Enter"), ("tab", "Tab"), ("escape", "Escape"), ("space", "Space"), ("back space", "Back"), ("delete", "Delete"),
         ("up", "Up"), ("down", "Down"), ("left", "Left"), ("right", "Right"), ("home", "Home"), ("end", "End"),
         ("page up", "PageUp"), ("page down", "PageDown")
+    ];
+
+    private static readonly string[] PhoneticLetters =
+    [
+        "alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf", "hotel", "india", "juliet", "kilo", "lima", "mike",
+        "november", "oscar", "papa", "quebec", "romeo", "sierra", "tango", "uniform", "victor", "whiskey", "x ray", "yankee", "zulu"
+    ];
+
+    /// <summary>Built-in window / app / browser commands ("rama close window"); each is just a key chord.</summary>
+    private static readonly (string Spoken, string Chord)[] AppCommands =
+    [
+        ("close window", "Alt+F4"), ("close app", "Alt+F4"),
+        ("switch window", "Alt+Tab"), ("switch app", "Alt+Tab"), ("task view", "Win+Tab"),
+        ("minimize", "Win+Down"), ("maximize", "Win+Up"),
+        ("snap left", "Win+Left"), ("snap right", "Win+Right"),
+        ("show desktop", "Win+D"), ("start menu", "Win"), ("search", "Win+S"),
+        ("new tab", "Ctrl+T"), ("close tab", "Ctrl+W"), ("reopen tab", "Ctrl+Shift+T"),
+        ("next tab", "Ctrl+Tab"), ("previous tab", "Ctrl+Shift+Tab"),
+        ("go back", "Alt+Left"), ("go forward", "Alt+Right"), ("refresh", "F5"), ("address bar", "Ctrl+L"),
+        ("copy", "Ctrl+C"), ("cut", "Ctrl+X"), ("paste", "Ctrl+V"), ("undo", "Ctrl+Z"), ("redo", "Ctrl+Y"),
+        ("select all", "Ctrl+A"), ("save", "Ctrl+S"), ("find", "Ctrl+F"),
+        ("top", "Ctrl+Home"), ("bottom", "Ctrl+End")
     ];
 
     private static readonly (string Spoken, string Chord)[] SpokenModifiers =
@@ -188,12 +215,25 @@ public sealed class VoiceCommandService : IDisposable
             }
         }
 
+        // Letters only after a modifier ("rama control t"), so a stray letter in conversation never types.
+        foreach (var (spokenModifier, chordModifier) in SpokenModifiers.Where(m => m.Chord.Length > 0))
+        {
+            // Spoken as phonetic words: bare letters ("t" vs "b") were confused by the recognizer.
+            for (var i = 0; i < PhoneticLetters.Length; i++)
+            {
+                var intent = new VoiceIntent(VoiceIntentKind.Press, 0, chordModifier + (char)('A' + i));
+                Add($"press {spokenModifier}{PhoneticLetters[i]}", intent);
+                Add($"{spokenModifier}{PhoneticLetters[i]}", intent);
+            }
+        }
+
         Add("click", new VoiceIntent(VoiceIntentKind.Click));
         Add("right click", new VoiceIntent(VoiceIntentKind.RightClick));
         Add("double click", new VoiceIntent(VoiceIntentKind.DoubleClick));
         Add("scroll up", new VoiceIntent(VoiceIntentKind.ScrollUp));
         Add("scroll down", new VoiceIntent(VoiceIntentKind.ScrollDown));
-        foreach (var (phrase, chord) in macros) Add(phrase, new VoiceIntent(VoiceIntentKind.Press, 0, chord));
+        foreach (var (phrase, chord) in AppCommands) Add(phrase, new VoiceIntent(VoiceIntentKind.Press, 0, chord));
+        foreach (var (phrase, chord) in macros) Add(phrase, new VoiceIntent(VoiceIntentKind.Press, 0, chord)); // user macros override built-ins
 
         _longestCommand = _commands.Keys.Max(phrase => phrase.Count(c => c == ' ') + 1);
         if (dropped.Count > 0) _ = _logger.InfoAsync($"Voice phrases dropped (word not in the speech model): {string.Join("; ", dropped)}.");
@@ -247,6 +287,9 @@ public sealed class VoiceCommandService : IDisposable
         normal.SetWords(true);
         grid.SetWords(true);
         var silence = new byte[ChunkBytes];
+        var previous = new byte[ChunkBytes];
+        var previousRead = 0;
+        var wasGated = true;
         var noiseFloor = MinSpeechRms / SpeechOverNoise;
         var speechUntil = DateTime.MinValue;
         var wasGrid = false;
@@ -292,6 +335,11 @@ public sealed class VoiceCommandService : IDisposable
                     var gated = DateTime.UtcNow > speechUntil;
                     if (gated && lastPartial.Length == 0) _peak = 0;
                     var chunk = gated ? silence : buffer;
+                    // Pre-roll: the chunk before the gate opened holds the start of the word (the "k" of click); feed it back in.
+                    if (!gated && wasGated && previousRead > 0) active.AcceptWaveform(previous, previousRead);
+                    wasGated = gated;
+                    Buffer.BlockCopy(buffer, 0, previous, 0, read);
+                    previousRead = read;
                     if (active.AcceptWaveform(chunk, read))
                     {
                         HandleResult(active.Result(), wasGrid);
@@ -341,7 +389,7 @@ public sealed class VoiceCommandService : IDisposable
                 {
                     var word = item.GetProperty("word").GetString() ?? string.Empty;
                     if (word == Unknown) continue;
-                    if (item.GetProperty("conf").GetDouble() >= MinWordConfidence) confident.Add(word);
+                    if (item.GetProperty("conf").GetDouble() >= MinWordConfidence || _wakeWords.Contains(word)) confident.Add(word);
                     else low.Add(word);
                 }
 
@@ -453,6 +501,13 @@ public sealed class VoiceCommandService : IDisposable
         for (var i = 0; i < words.Length; i++)
         {
             var next = i + 1 < words.Length ? words[i + 1] : string.Empty;
+            var cellWord = Array.IndexOf(GridPointerService.CellWords, words[i]);
+            if (cellWord >= 0)
+            {
+                GridWordSpoken?.Invoke(cellWord + 1);
+                continue;
+            }
+
             var digit = Array.IndexOf(NumberWords, words[i]);
             if (digit is >= 0 and < 9)
             {

@@ -1,6 +1,6 @@
 # HeadPointerMvp — project state
 
-Last updated 2026-10-16 by "voice noise robustness, feedback beeps, key shorthand"
+Last updated 2026-10-19 by "5x5 grid, dictation research"
 
 ## Purpose & shape
 Windows tray app (WinForms, .NET 8) for multi-monitor, low-mouse use. Voice (Vosk offline, closed grammar, NAudio capture) and hotkeys pick a monitor; webcam head yaw (CameraBridge process, OpenCvSharp+YuNet → UDP 127.0.0.1:11573) can too but is OFF by default (user: camera isn't best); a numbered zoom grid points/clicks anywhere.
@@ -26,11 +26,20 @@ Build: `dotnet build HeadPointerMvp.sln`. Settings: `%LocalAppData%\HeadPointerM
 - Noise robustness: prefers `vosk-model-en-us-0.22-lgraph` (~128 MB, in models folder, falls back to small); noise gate (adaptive floor, gated audio becomes silence); per-word confidence filter (0.4, dropped words logged). Built OK but NOT yet verified by real mic (app was running, exe locked: close it, rebuild, test).
 - Voice feedback: wake word -> rising beep, command ran -> double chirp (NAudio tones on the default output; Console.Beep was inaudible; tray balloons rejected as annoying), wake without command in 5 s -> low buzz (`VoiceCommandService.Feedback` -> `AppHost.VoiceFeedback`). Keys also work without "press" ("rama alt tab"), since the recognizer often drops "press". Not yet verified by ear.
 
+- Modifier+letter keys by voice, phonetic ("rama control tango" = Ctrl+T; bare letters t/b were confused, also with alt/shift/control shift/control alt); letters need a modifier. Compiles; NOT yet verified by real mic (app was running, exe locked).
+
+- Voice reliability (from logs: "rama" heard, then the command after a pause was a miss, because the grammar only held whole "rama X" phrases): grammar now also holds "rama" alone and every command bare (bare ones act only while awake, 3 s follow-up window); wake word exempt from the confidence filter (threshold 0.3); gate floor 450->300 RMS plus one-chunk pre-roll so word onsets ("k" of click) survive. NOT yet verified by real mic.
+- Feedback sounds now differ in character (`FeedbackSounds.cs`): rising whoop = wake, dry tick = command ran, Windows "Speech Misrecognition" wav = no command.
+- Built-in app commands (`AppCommands` in VoiceCommandService): close window/app (Alt+F4), switch window, task view, minimize, maximize, snap left/right, show desktop, start menu, search, new/close/reopen/next/previous tab, go back/forward, refresh, address bar, copy/cut/paste/undo/redo/select all/save/find, top/bottom. User `VoiceMacros` override them.
+
+- Grid option A (user picked, trial; revert if it does not help): first level is 4x4 named by NATO words alpha..papa (voice words or keyboard A-P except D/R), deeper levels stay 3x3 digits. Digits at level 1 and words deeper are ignored. NOT yet verified by mic.
+
 ## In progress
 Nothing. Camera is not used (CameraTrackingEnabled=false, no CameraBridge process); the user keeps the shutter closed and works by voice.
 
 ## Remaining
 - Decide with the user (discuss BEFORE building; they dislike unrequested designs): how to keep spoken commands out of an external dictation tool. Options: per-app commands keyed by foreground process ("start/stop dictating" -> shortcut or UIA button click; probe UIA names in Claude desktop/Slack first), a silent hotkey, or built-in Vosk dictation mode (PARKED by user).
+- Claude desktop (Windows) has no dictation shortcut (checked settings, config files, docs 2026-10-19); Claude UI buttons are invisible to UIA. User chose to do nothing: use the grid. Options if revisited: Win+H macro, or a saved-position click (saved spots were rejected earlier).
 - Possibly remove the camera/head-tracking code (user undecided; ask).
 - Tune noise gate and confidence filter by real use (`MinSpeechRms`, `SpeechOverNoise`, `MinWordConfidence` in VoiceCommandService.cs; log shows `dropped low-confidence words`).
 - Grid-mode grammar is loose (includes wake-prefixed phrases); tighten if stray words fire.
@@ -38,10 +47,10 @@ Nothing. Camera is not used (CameraTrackingEnabled=false, no CameraBridge proces
 - Mic input level must stay ~60-65% (100% clipped and wrecked accuracy); the app never changes system settings.
 
 ## Last session
-Downloaded vosk-model-en-us-0.22-lgraph (128 MB, in the models folder; code prefers it, falls back to small). Added noise gate, per-word confidence filter, audible feedback (rising beep = wake word heard, double chirp = command ran, low buzz = no command in 5 s; NAudio tones, tray balloons rejected as annoying), and key commands without "press" ("rama alt tab" works). Saved-spots idea was built, rejected by the user and reverted. Verified by user: beeps audible, commands run. Build clean.
+Fixed from the user's report: confusing beeps, commands needing 3 repeats (esp. click), no window/app commands. Changes above (sounds, grammar, gate, AppCommands). Build clean; deployed copy NOT republished and nothing verified by mic yet; changes uncommitted (also holds the earlier phonetic-letter work).
 
 ## Next task
-Discuss the dictation/command-leak options above with the user and agree one before coding. Done when the user picks a design and a first command works in Claude desktop within 2 tries.
+Publish, then check by mic: "rama click" once and "rama" (pause) "click" both work; log shows no unexpected `Voice phrases dropped`; the three sounds are distinguishable. Then discuss grid speed (Remaining) and the dictation-leak options with the user before coding either.
 
 ## Decisions & gotchas
 - Swallowed Ctrl+Alt+G still lets the remote see Ctrl+Alt down/up (only the G is eaten); harmless so far.
@@ -50,3 +59,5 @@ Discuss the dictation/command-leak options above with the user and agree one bef
 - Grid keyboard input is a WH_KEYBOARD_LL hook installed only while the grid is open; it ignores keys with Ctrl/Alt/Win held.
 - Speech events arrive on a background thread; AppHost posts to the captured UI SynchronizationContext before touching forms/hooks.
 - Looking at the keyboard fooled the old yaw-nearest router; typing-activity freeze is the main fix, pitch freeze the backup.
+- Grid first level is 5x5 (alpha..zulu by voice; keyboard A-W, not D/R-conflicting ones); deeper levels 3x3 digits. Deployed 2026-10-19, not yet verified by mic.
+- Deployed copy: `dotnet publish src/HeadPointerMvp/HeadPointerMvp.csproj -c Release -o C:\Users\chkri\Apps\HeadPointer` (stop the running exe first); autostarts via HKCU Run value `HeadPointer`. Dev builds in bin\Debug don't touch it; settings/logs/models are shared in %LocalAppData%\HeadPointerMvp, so quit the deployed app before testing a dev build.

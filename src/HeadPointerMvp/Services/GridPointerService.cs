@@ -25,7 +25,9 @@ public enum GridCommand
 /// </summary>
 public sealed class GridPointerService(PointerService pointer, MonitorService monitors, FileLogger logger) : IDisposable
 {
+    private const int FirstDivisions = 5; // first level: 5x5 cells named by NATO words; deeper levels: 3x3 digits
     private const int Divisions = 3;
+    public static readonly string[] CellWords = ["alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf", "hotel", "india", "juliet", "kilo", "lima", "mike", "november", "oscar", "papa", "quebec", "romeo", "sierra", "tango", "uniform", "victor", "whiskey", "yankee", "zulu"];
     private const int MinCellPixels = 6;
 
     private readonly Stack<Rectangle> _history = new();
@@ -77,16 +79,32 @@ public sealed class GridPointerService(PointerService pointer, MonitorService mo
         ActiveChanged?.Invoke(false);
     }
 
-    /// <summary>Zooms into cell 1..9 (reading order).</summary>
+    private int CurrentDivisions => _history.Count == 0 ? FirstDivisions : Divisions;
+
+    /// <summary>Zooms into digit cell 1..9 (reading order). Only on the zoomed levels; the first level uses words (<see cref="ZoomWord"/>).</summary>
     public void Zoom(int cell)
     {
-        if (!IsActive || cell is < 1 or > Divisions * Divisions) return;
-        var cellWidth = _rect.Width / (double)Divisions;
-        var cellHeight = _rect.Height / (double)Divisions;
+        if (_history.Count == 0) return;
+        ZoomCell(cell);
+    }
+
+    /// <summary>Zooms into a first-level cell by its NATO word ("alpha" = top-left, "zulu" = bottom-right).</summary>
+    public void ZoomWord(int cell)
+    {
+        if (_history.Count != 0) return;
+        ZoomCell(cell);
+    }
+
+    private void ZoomCell(int cell)
+    {
+        var divisions = CurrentDivisions;
+        if (!IsActive || cell < 1 || cell > divisions * divisions) return;
+        var cellWidth = _rect.Width / (double)divisions;
+        var cellHeight = _rect.Height / (double)divisions;
         if (cellWidth < MinCellPixels || cellHeight < MinCellPixels) return; // already as fine as it gets: Enter to click
 
-        var column = (cell - 1) % Divisions;
-        var row = (cell - 1) / Divisions;
+        var column = (cell - 1) % divisions;
+        var row = (cell - 1) / divisions;
         _history.Push(_rect);
         _rect = new Rectangle(
             _rect.Left + (int)Math.Round(column * cellWidth),
@@ -154,7 +172,7 @@ public sealed class GridPointerService(PointerService pointer, MonitorService mo
     {
         if (_form is null) return;
         pointer.MoveTo(_rect.Left + (_rect.Width / 2), _rect.Top + (_rect.Height / 2));
-        _form.SetRegion(_rect, Divisions, _history.Count);
+        _form.SetRegion(_rect, CurrentDivisions, _history.Count);
     }
 
     // ---- keyboard ------------------------------------------------------------------------------
@@ -188,6 +206,10 @@ public sealed class GridPointerService(PointerService pointer, MonitorService mo
         action = () => { };
         switch (vk)
         {
+            case >= 0x41 and <= 0x57 when _history.Count == 0 && vk is not (0x44 or 0x52): // A-W name first-level cells (alpha..whiskey; yankee and zulu are voice-only); D and R stay double/right click
+                var letter = vk - 0x40;
+                action = () => ZoomWord(letter);
+                return true;
             case >= 0x31 and <= 0x39: // top-row 1-9
                 var topRow = vk - 0x30;
                 action = () => Zoom(topRow);
@@ -295,7 +317,8 @@ public sealed class GridPointerService(PointerService pointer, MonitorService mo
             {
                 for (var column = 0; column < _divisions; column++)
                 {
-                    var text = ((row * _divisions) + column + 1).ToString();
+                    var number = (row * _divisions) + column + 1;
+                    var text = _depth == 0 ? CellWords[number - 1] : number.ToString();
                     var size = g.MeasureString(text, font);
                     var boxW = size.Width + 6;
                     var boxH = size.Height;
@@ -310,7 +333,7 @@ public sealed class GridPointerService(PointerService pointer, MonitorService mo
 
             // Hint strip, bottom-centre of the screen.
             using var hintFont = new Font("Segoe UI", 15, FontStyle.Regular, GraphicsUnit.Pixel);
-            const string Hint = "1-9 zoom   Enter click   R right-click   D double-click   Backspace back   Tab next monitor   Esc cancel";
+            const string Hint = "letter/word then 1-9 zoom   Enter click   R right-click   D double-click   Backspace back   Tab next monitor   Esc cancel";
             var hintSize = g.MeasureString(Hint, hintFont);
             var hx = (ClientSize.Width - hintSize.Width) / 2;
             var hy = ClientSize.Height - hintSize.Height - 16;
